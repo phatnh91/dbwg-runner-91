@@ -1,0 +1,176 @@
+# KHO PUBLIC (thử nghiệm): chạy "Tạo video" trên máy miễn phí của GitHub, lấy mã và ghi kết quả về kho private.
+# Đặt file này ở .github/workflows/generate.yml của kho public. Cần: secret PRIVATE_REPO_TOKEN (Contents: Read and write
+# trên kho private), các secret như generate.yml gốc, và biến repo XOAI_AI_PROVIDERS nếu kho private có dùng.
+# Sinh tự động từ .github/workflows/generate.yml: sửa file gốc thì sinh lại, đừng sửa tay hai nơi.
+name: 1 - Tao video (kho public, thu nghiem)
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Trang: en, vi, annhien, luatchoi (nhiều trang cách nhau dấu phẩy, vd en,vi). Để trống = tất cả"
+        required: false
+        default: ""
+      slot:
+        description: "Lượt: main (lượt chính) hoặc noon (lượt 12:00 của annhien). Để trống = tất cả"
+        required: false
+        default: ""
+      auto:
+        description: "1 = chạy từ lịch hẹn giờ bên ngoài (cron-job.org): bỏ qua nếu hôm nay đã làm rồi"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Mỗi dòng là một trang. Thêm trang mới: thêm một dòng và tạo thư mục channels/<channel>/
+        include:
+          - channel: en
+            cron: "47 2 * * *|31 3 * * *"
+          - channel: vi
+            cron: "47 2 * * *|31 3 * * *"
+          - channel: annhien
+            cron: "47 2 * * *|31 3 * * *"
+          - channel: annhien
+            slot: noon
+            cron: "47 0 * * *|31 1 * * *"
+          - channel: luatchoi
+            cron: "47 2 * * *|31 3 * * *"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          sparse-checkout: tools   # chế độ cone: luôn có kèm các file ở thư mục gốc (schedule.json)
+          path: sched
+      - name: Kiểm tra có chạy trang này không
+        id: gate
+        run: |
+          TAG="${{ matrix.channel }}${{ matrix.slot && format('-{0}', matrix.slot) || '' }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          CH_IN="$(echo "${{ github.event.inputs.channel }}" | tr -d '[:space:]')"
+          SLOT_IN="$(echo "${{ github.event.inputs.slot }}" | tr -d '[:space:]')"
+          RUN=true
+          # channel: một hoặc nhiều mã trang cách nhau bởi dấu phẩy (en,vi). slot: main hoặc noon. Trống = tất cả
+          if [ -n "$CH_IN" ] && [[ ",$CH_IN," != *",${{ matrix.channel }},"* ]]; then RUN=false; fi
+          if [ -n "$SLOT_IN" ] && [ "$SLOT_IN" != "${{ matrix.slot || 'main' }}" ]; then RUN=false; fi
+          if [ "${{ github.event_name }}" = "schedule" ] && [[ "|${{ matrix.cron }}|" != *"|${{ github.event.schedule }}|"* ]]; then RUN=false; fi
+          # Lượt tự động (lịch GitHub hoặc auto=1): theo công tắc bật/tắt và giờ đăng trong schedule.json (Lời Chúa Studio)
+          if [ "$RUN" = true ] && { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.auto }}" = "1" ]; }; then
+            OK=$(python3 sched/tools/schedule_gate.py gate generate "${{ matrix.channel }}" "${{ matrix.slot || 'main' }}" 2>/dev/null || echo true)
+            [ "$OK" = "false" ] && { echo "::notice::Lịch trong Lời Chúa Studio đang tắt lượt này hoặc chưa tới giờ"; RUN=false; }
+          fi
+          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Cài ffmpeg và thư viện
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+          pip install -r requirements.txt
+
+      - name: Kiểm tra kênh có dùng giọng riêng không
+        if: steps.gate.outputs.run == 'true'
+        id: tts
+        run: |
+          if python3 -c "import json,sys; c=json.load(open('channels/${{ matrix.channel }}/config.json',encoding='utf-8')); sys.exit(0 if c.get('tts_provider')=='custom' else 1)"; then
+            echo "custom=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "custom=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Nhớ model giọng riêng giữa các lần chạy
+        if: steps.gate.outputs.run == 'true' && steps.tts.outputs.custom == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: vieneu-v3-turbo-hf
+
+      - name: Cài giọng riêng (VieNeu-TTS)
+        if: steps.gate.outputs.run == 'true' && steps.tts.outputs.custom == 'true'
+        continue-on-error: true   # cài lỗi thì bot tự đọc bằng giọng Edge dự phòng
+        run: pip install -r requirements-tts.txt
+
+      - name: Tạo video
+        if: steps.gate.outputs.run == 'true'
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          SLOT: ${{ matrix.slot }}
+          SKIP_IF_DONE: ${{ (github.event_name == 'schedule' || github.event.inputs.auto == '1') && '1' || '' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
+          AI_PROVIDERS: ${{ vars.XOAI_AI_PROVIDERS }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Log của kho public ai cũng đọc được: chỉ in dòng trạng thái, không in tên chủ đề hay nội dung kịch bản
+        run: |
+          set +e
+          python generate.py > "$RUNNER_TEMP/gen.log" 2>&1
+          rc=$?
+          grep -E "Tổng thời lượng|Đã lưu|CẢNH BÁO|vượt giới hạn|AI lỗi|HTTP [0-9]{3}" "$RUNNER_TEMP/gen.log" | cut -c1-200 | head -30
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 5 dòng cuối:"; tail -n 5 "$RUNNER_TEMP/gen.log" | cut -c1-200; fi
+          exit $rc
+
+      - name: Lưu video cho bước đăng bài
+        id: upload
+        if: steps.gate.outputs.run == 'true' && vars.USE_ARTIFACTS == '1'   # mặc định TẮT: video chuyển qua nhánh previews, không tốn dung lượng artifact
+        continue-on-error: true   # hết dung lượng artifact thì vẫn lưu bản xem trước ở nhánh previews (không tính dung lượng artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: reel-${{ steps.gate.outputs.tag }}
+          path: out/${{ steps.gate.outputs.tag }}/
+          retention-days: 1
+          if-no-files-found: ignore
+
+      - name: Lưu bản xem trước cho Lời Chúa Studio
+        id: preview
+        if: steps.gate.outputs.run == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          TARGET_REPO: phatnh91/dailybreadwithgod
+        run: bash tools/save_preview.sh "${{ steps.gate.outputs.tag }}"
+
+      - name: Ghi lại câu đã dùng
+        if: always() && steps.gate.outputs.run == 'true'
+        run: |
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          # Video không lưu được ở CẢ artifact lẫn nhánh previews thì KHÔNG ghi câu này vào lịch sử, để lần sau tạo lại đúng luật đó
+          if [ "${{ steps.gate.outputs.run }}" = "true" ] && [ "${{ steps.preview.outputs.saved }}" != "true" ] && [ "${{ steps.upload.outcome }}" != "success" ]; then
+            echo "::warning::Lưu video lỗi, không ghi lịch sử để lần sau tạo lại"
+            git checkout -- channels
+          fi
+          git add -A channels
+          [ -d content ] || git add -A content 2>/dev/null || true
+          git diff --cached --quiet && exit 0
+          git commit -m "Lịch sử ${{ steps.gate.outputs.tag }}: $(date -u +%F)"
+          for i in 1 2 3 4 5; do
+            git pull --rebase && git push && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
