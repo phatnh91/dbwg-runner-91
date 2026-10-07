@@ -131,7 +131,7 @@ jobs:
           set +e
           python generate.py > "$RUNNER_TEMP/gen.log" 2>&1
           rc=$?
-          grep -E "Tổng thời lượng|Đã lưu|CẢNH BÁO|vượt giới hạn|AI lỗi|HTTP [0-9]{3}" "$RUNNER_TEMP/gen.log" | cut -c1-200 | head -30
+          grep -E "Tổng thời lượng|Đã lưu|CẢNH BÁO|vượt giới hạn|AI lỗi|HTTP [0-9]{3}|cấu hình AI|giải mã|AI_CONFIG_SECRET" "$RUNNER_TEMP/gen.log" | cut -c1-200 | head -30
           if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 5 dòng cuối:"; tail -n 5 "$RUNNER_TEMP/gen.log" | cut -c1-200; fi
           exit $rc
 
