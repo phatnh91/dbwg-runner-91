@@ -1,0 +1,23 @@
+name: poc - lay ma tu kho private
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  poc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Lấy mã từ kho private
+        uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          path: priv
+      - name: Kiểm tra (chỉ in số lượng)
+        run: |
+          echo "Số kênh: $(ls priv/channels | wc -l)"
+          echo "Số workflow: $(ls priv/.github/workflows | wc -l)"
+          python3 --version
+          ffmpeg -version | head -1
+          free -h | head -2
+          nproc
