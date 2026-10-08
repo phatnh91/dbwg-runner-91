@@ -1,0 +1,152 @@
+# KHO PUBLIC: chạy việc trên máy miễn phí của GitHub, lấy mã từ kho private và ghi kết quả về kho private.
+# Đặt file này ở .github/workflows/publish.yml của kho public. Cần secret PRIVATE_REPO_TOKEN (Contents: Read and write
+# trên kho private) và các secret như file gốc. Sinh tự động bằng tools/public_runner/make_public.py: đừng sửa tay.
+name: 2 - Dang video (kho public)
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Trang: en, vi, annhien, luatchoi (nhiều trang cách nhau dấu phẩy, vd en,vi). Để trống = tất cả"
+        required: false
+        default: ""
+      slot:
+        description: "Lượt: main (lượt chính) hoặc noon (lượt 12:00 của annhien). Để trống = tất cả"
+        required: false
+        default: ""
+      auto:
+        description: "1 = chạy từ lịch hẹn giờ bên ngoài (cron-job.org): bỏ qua nếu hôm nay đã làm rồi"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Hai lượt cùng đăng một trang (cron-job.org + lịch GitHub dự phòng) phải xếp hàng, không chạy song song => không đăng trùng
+    concurrency:
+      group: publish-${{ matrix.channel }}-${{ matrix.slot || 'main' }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        # suffix: đuôi tên secret của trang. Trang en dùng FB_PAGE_ID / FB_PAGE_TOKEN,
+        # trang vi dùng FB_PAGE_ID_VI / FB_PAGE_TOKEN_VI, trang annhien dùng FB_PAGE_ID_AN / FB_PAGE_TOKEN_AN, trang luatchoi dùng FB_PAGE_ID_LC / FB_PAGE_TOKEN_LC.
+        # cron: những lịch nào (ở mục on.schedule, cách nhau bởi |) thì đăng trang này. Chạy tay thì không xét cron.
+        include:
+          - channel: en
+            suffix: ""
+            cron: "53 11 * * *|38 12 * * *"
+          - channel: vi
+            suffix: "_VI"
+            cron: "53 11 * * *|38 12 * * *"
+          - channel: annhien
+            suffix: "_AN"
+            cron: "53 13 * * *|38 14 * * *"
+          - channel: annhien
+            slot: noon
+            suffix: "_AN"
+            cron: "53 4 * * *|38 5 * * *"
+          - channel: luatchoi
+            suffix: "_LC"
+            cron: "53 11 * * *|38 12 * * *"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          sparse-checkout: tools   # chế độ cone: luôn có kèm các file ở thư mục gốc (schedule.json)
+          path: sched
+      - name: Kiểm tra có chạy trang này không
+        id: gate
+        run: |
+          TAG="${{ matrix.channel }}${{ matrix.slot && format('-{0}', matrix.slot) || '' }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          CH_IN="$(echo "${{ github.event.inputs.channel }}" | tr -d '[:space:]')"
+          SLOT_IN="$(echo "${{ github.event.inputs.slot }}" | tr -d '[:space:]')"
+          RUN=true
+          # channel: một hoặc nhiều mã trang cách nhau bởi dấu phẩy (en,vi). slot: main hoặc noon. Trống = tất cả
+          if [ -n "$CH_IN" ] && [[ ",$CH_IN," != *",${{ matrix.channel }},"* ]]; then RUN=false; fi
+          if [ -n "$SLOT_IN" ] && [ "$SLOT_IN" != "${{ matrix.slot || 'main' }}" ]; then RUN=false; fi
+          if [ "${{ github.event_name }}" = "schedule" ] && [[ "|${{ matrix.cron }}|" != *"|${{ github.event.schedule }}|"* ]]; then RUN=false; fi
+          # Lượt tự động (lịch GitHub hoặc auto=1): theo công tắc bật/tắt và giờ đăng trong schedule.json (Lời Chúa Studio)
+          if [ "$RUN" = true ] && { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.auto }}" = "1" ]; }; then
+            OK=$(python3 sched/tools/schedule_gate.py gate publish "${{ matrix.channel }}" "${{ matrix.slot || 'main' }}" 2>/dev/null || echo true)
+            [ "$OK" = "false" ] && { echo "::notice::Lịch trong Lời Chúa Studio đang tắt lượt này hoặc chưa tới giờ"; RUN=false; }
+          fi
+          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Cài thư viện
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          pip install requests
+          which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)  # mã hóa lại khi Instagram từ chối video
+
+      - name: Lấy video đã tạo hôm nay
+        if: steps.gate.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        run: |
+          TAG="${{ steps.gate.outputs.tag }}"
+          # Cách chính: bản đã lưu ở nhánh previews (reel.mp4, meta.json, reel_yt.mp4...), không dùng dung lượng artifact
+          rm -rf /tmp/pvx
+          if git clone -q --depth 1 -b previews "https://x-access-token:${GH_TOKEN}@github.com/phatnh91/dailybreadwithgod.git" /tmp/pvx 2>/dev/null \
+             && [ -f "/tmp/pvx/$TAG/reel.mp4" ] && [ -f "/tmp/pvx/$TAG/meta.json" ]; then
+            mkdir -p "out/$TAG" && cp /tmp/pvx/$TAG/* "out/$TAG/" && rm -f "out/$TAG/saved_at.txt"
+            echo "Đã lấy video từ nhánh previews ($(cat /tmp/pvx/$TAG/saved_at.txt 2>/dev/null))"
+            exit 0
+          fi
+          # (Kho public: không tìm artifact dự phòng, video luôn lấy từ nhánh previews)
+          echo "Không tìm thấy video của $TAG"
+
+      - name: Đăng lên Facebook
+        if: steps.gate.outputs.run == 'true'
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          SLOT: ${{ matrix.slot }}
+          FB_PAGE_ID: ${{ secrets[format('FB_PAGE_ID{0}', matrix.suffix)] }}
+          FB_PAGE_TOKEN: ${{ secrets[format('FB_PAGE_TOKEN{0}', matrix.suffix)] }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets[format('YT_REFRESH_TOKEN{0}', matrix.suffix)] }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          AUTO: ${{ (github.event_name == 'schedule' || github.event.inputs.auto == '1') && '1' || '' }}
+        # Log của kho public ai cũng đọc được: lọc bớt, chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python publish.py > "$RUNNER_TEMP/pub.log" 2>&1
+          rc=$?
+          grep -E "✅|❌|⚠|Đã đăng|đã đăng|bỏ qua|Bỏ qua|lỗi|Lỗi|HTTP [0-9]{3}|quá hạn|token|Facebook|YouTube|Instagram" "$RUNNER_TEMP/pub.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/pub.log" | cut -c1-200; fi
+          exit $rc
+
+      - name: Ghi lại nền tảng đã đăng (tránh đăng trùng khi chạy lại)
+        if: always() && steps.gate.outputs.run == 'true'
+        run: |
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add channels/${{ matrix.channel }}/posted.csv 2>/dev/null || exit 0
+          git diff --cached --quiet && exit 0
+          git commit -m "Đã đăng ${{ steps.gate.outputs.tag }}: $(date -u +%F)"
+          for i in 1 2 3 4 5; do
+            git pull --rebase && git push && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
