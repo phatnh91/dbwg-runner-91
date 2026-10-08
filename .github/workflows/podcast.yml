@@ -1,0 +1,298 @@
+# KHO PUBLIC: chạy việc trên máy miễn phí của GitHub, lấy mã từ kho private và ghi kết quả về kho private.
+# Đặt file này ở .github/workflows/podcast.yml của kho public. Cần secret PRIVATE_REPO_TOKEN (Contents: Read and write
+# trên kho private) và các secret như file gốc. Sinh tự động bằng tools/public_runner/make_public.py: đừng sửa tay.
+name: 6 - Podcast Tam Su An Nhien (kho public)
+
+# 1. plan  : bot viết kịch bản + ElevenLabs đọc + gửi prompt Flow qua Telegram (thứ 2 và thứ 5 ~7:45, hoặc chạy tay)
+# 2. build : tự chạy khi bạn Push cảnh vào podcast/<id>/clips/ -> ghép video, gửi xem trước, chờ đăng
+# 3. publish: điều phối gọi ~18:45 hằng ngày; đăng tập đang chờ nếu đã xem trước >= 2 tiếng và không có /skippodcast
+on:
+  push:
+    branches: [main]
+    paths:
+      - "podcast/*/clips/**"
+  workflow_dispatch:
+    inputs:
+      action:
+        type: choice
+        options: ["plan", "revoice", "build", "publish"]
+        default: "plan"
+      topic:
+        description: "plan: mã chủ đề trong podcast/topics.csv (trống = chủ đề tiếp theo)"
+        required: false
+        default: ""
+      id:
+        description: "build / revoice: mã tập (build trống = tập vừa thêm cảnh)"
+        required: false
+        default: ""
+      auto:
+        description: "1 = gọi từ lịch điều phối"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: podcast
+  cancel-in-progress: false
+
+jobs:
+  mode:
+    runs-on: ubuntu-latest
+    outputs:
+      action: ${{ steps.m.outputs.action }}
+      id: ${{ steps.m.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          fetch-depth: 0
+      - id: m
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            ID=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" 2>/dev/null | grep -E '^podcast/[^/]+/clips/.+\.mp4$' | head -1 | cut -d/ -f2)
+            echo "action=build" >> "$GITHUB_OUTPUT"; echo "id=$ID" >> "$GITHUB_OUTPUT"
+          else
+            echo "action=${{ github.event.inputs.action }}" >> "$GITHUB_OUTPUT"; echo "id=${{ github.event.inputs.id }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  plan:
+    needs: mode
+    if: needs.mode.outputs.action == 'plan'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Cài ffmpeg và thư viện
+        run: |
+          which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+          pip install -r requirements.txt
+      - name: Viết kịch bản, đọc giọng, gửi prompt Flow
+        id: p
+        env:
+          TOPIC: ${{ github.event.inputs.topic }}
+          AUTO: ${{ github.event.inputs.auto }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
+          AI_PROVIDERS: ${{ vars.XOAI_AI_PROVIDERS }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID_AN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python podcast_build.py plan > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Đã |đã |Lỗi|lỗi|CẢNH BÁO|HTTP [0-9]{3}|Tổng thời lượng|bỏ qua|Bỏ qua|CONN_RESULT" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/step.log" | cut -c1-200; fi
+          exit $rc
+      - name: Lưu kịch bản và giọng đọc vào repo
+        if: steps.p.outputs.id != ''
+        run: |
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add "podcast/${{ steps.p.outputs.id }}"
+          git commit -m "Podcast: chuẩn bị tập ${{ steps.p.outputs.id }}"
+          for i in 1 2 3 4 5; do git pull --rebase && git push && break; sleep $((i * 5)); done
+      - name: Tự nhép miệng (chế độ tự động)
+        if: steps.p.outputs.id != '' && steps.p.outputs.auto_lipsync == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run lipsync.yml -f id="${{ steps.p.outputs.id }}" -f clip="${{ steps.p.outputs.base_clip }}" -f mode=fast
+
+  revoice:
+    needs: mode
+    if: needs.mode.outputs.action == 'revoice'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Cài ffmpeg và thư viện
+        run: |
+          which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+          pip install -r requirements.txt
+      - name: Đọc lại giọng
+        env:
+          PODCAST_ID: ${{ needs.mode.outputs.id }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
+          AI_PROVIDERS: ${{ vars.XOAI_AI_PROVIDERS }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID_AN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python podcast_build.py revoice > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Đã |đã |Lỗi|lỗi|CẢNH BÁO|HTTP [0-9]{3}|Tổng thời lượng|bỏ qua|Bỏ qua|CONN_RESULT" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/step.log" | cut -c1-200; fi
+          exit $rc
+      - name: Lưu giọng mới
+        run: |
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add "podcast/${{ needs.mode.outputs.id }}"
+          git diff --cached --quiet && exit 0
+          git commit -m "Podcast: đọc lại giọng ${{ needs.mode.outputs.id }}"
+          for i in 1 2 3 4 5; do git pull --rebase && git push && exit 0; sleep $((i * 5)); done
+          exit 1
+
+  build:
+    needs: mode
+    if: needs.mode.outputs.action == 'build'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Cài ffmpeg và thư viện
+        run: |
+          which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+          pip install -r requirements.txt
+      - name: Ghép podcast
+        id: b
+        env:
+          PODCAST_ID: ${{ needs.mode.outputs.id }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python podcast_build.py build > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Đã |đã |Lỗi|lỗi|CẢNH BÁO|HTTP [0-9]{3}|Tổng thời lượng|bỏ qua|Bỏ qua|CONN_RESULT" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/step.log" | cut -c1-200; fi
+          exit $rc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: podcast-${{ steps.b.outputs.id }}
+          path: out/annhien/
+          retention-days: 10
+      - name: Ghi tập chờ đăng
+        run: |
+          python podcast_build.py pending --id "${{ steps.b.outputs.id }}"
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add podcast/pending.json
+          git commit -m "Podcast: chờ đăng ${{ steps.b.outputs.id }}"
+          for i in 1 2 3 4 5; do git pull --rebase && git push && exit 0; sleep $((i * 5)); done
+          exit 1
+
+  publish:
+    needs: mode
+    if: needs.mode.outputs.action == 'publish'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Có tập nào chờ đăng không
+        id: p
+        env:
+          EVENT: ${{ github.event.inputs.auto == '1' && 'auto' || 'manual' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python podcast_build.py publish-plan > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Đã |đã |Lỗi|lỗi|CẢNH BÁO|HTTP [0-9]{3}|Tổng thời lượng|bỏ qua|Bỏ qua|CONN_RESULT" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/step.log" | cut -c1-200; fi
+          exit $rc
+      - name: Lấy video đã ghép
+        if: steps.p.outputs.id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          NAME="podcast-${{ steps.p.outputs.id }}"
+          for RUN_ID in $(gh run list --workflow podcast.yml --limit 30 --json databaseId -q '.[].databaseId'); do
+            if gh run download "$RUN_ID" -n "$NAME" -D out/annhien 2>/dev/null; then echo "Đã lấy $NAME"; exit 0; fi
+          done
+          echo "Không tìm thấy $NAME"; exit 1
+      - name: Đăng lên Facebook
+        if: steps.p.outputs.id != ''
+        env:
+          CHANNEL: annhien
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID_AN }}
+          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN_AN }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN_AN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python publish.py > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Đã |đã |Lỗi|lỗi|CẢNH BÁO|HTTP [0-9]{3}|Tổng thời lượng|bỏ qua|Bỏ qua|CONN_RESULT" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/step.log" | cut -c1-200; fi
+          exit $rc
+      - name: Đánh dấu đã đăng xong
+        if: success() && steps.p.outputs.id != ''
+        # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python podcast_build.py done --id "${{ steps.p.outputs.id }}" > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Đã |đã |Lỗi|lỗi|CẢNH BÁO|HTTP [0-9]{3}|Tổng thời lượng|bỏ qua|Bỏ qua|CONN_RESULT" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/step.log" | cut -c1-200; fi
+          exit $rc
+      - name: Lưu trạng thái
+        if: always()
+        run: |
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          for f in podcast/pending.json podcast/done.csv channels/annhien/posted.csv; do git add -A "$f" 2>/dev/null || true; done
+          git diff --cached --quiet && exit 0
+          git commit -m "Podcast: đã đăng ${{ steps.p.outputs.id }}"
+          for i in 1 2 3 4 5; do git pull --rebase && git push && exit 0; sleep $((i * 5)); done
+          exit 1

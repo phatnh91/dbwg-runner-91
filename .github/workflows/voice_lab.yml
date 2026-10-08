@@ -1,0 +1,90 @@
+# KHO PUBLIC: chạy việc trên máy miễn phí của GitHub, lấy mã từ kho private và ghi kết quả về kho private.
+# Đặt file này ở .github/workflows/voice_lab.yml của kho public. Cần secret PRIVATE_REPO_TOKEN (Contents: Read and write
+# trên kho private) và các secret như file gốc. Sinh tự động bằng tools/public_runner/make_public.py: đừng sửa tay.
+name: 9 - Giong doc (nghe thu) (kho public)
+
+# Chạy từ Lời Chúa Studio → Giọng đọc: đọc thử một câu bằng giọng mẫu đã lưu trong assets/voices/<tên>/.
+# Không dùng secret của kênh, không đăng gì; bản nghe thử lưu ở nhánh "previews" (voices/<tên>/preview.mp3).
+on:
+  workflow_dispatch:
+    inputs:
+      voice:
+        description: "Tên giọng (thư mục trong assets/voices)"
+        required: true
+      text:
+        description: "Câu thử đọc"
+        required: true
+      speed:
+        description: "Tốc độ (0.7-1.2, 1 = nguyên bản). Trống = theo voice.json"
+        required: false
+        default: ""
+      pause:
+        description: "Khoảng nghỉ giữa các cụm (giây, 0.1-1). Trống = theo voice.json"
+        required: false
+        default: ""
+      denoise:
+        description: "1 = lọc nền giọng mẫu, 0 = không. Trống = theo voice.json"
+        required: false
+        default: ""
+      pause_mode:
+        description: "flat = nghỉ đều, natural = nghỉ tự nhiên. Trống = theo voice.json"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: voice-lab
+  cancel-in-progress: false
+
+jobs:
+  lab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cài ffmpeg
+        run: which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+
+      - name: Nhớ model giữa các lần chạy
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: vieneu-v3-turbo-hf
+
+      - name: Cài giọng riêng (VieNeu-TTS)
+        run: pip install -r requirements.txt -r requirements-tts.txt
+
+      - name: Đọc thử
+        env:
+          CHANNEL: vi
+          VOICE: ${{ github.event.inputs.voice }}
+          TEXT: ${{ github.event.inputs.text }}
+          SPEED: ${{ github.event.inputs.speed }}
+          PAUSE: ${{ github.event.inputs.pause }}
+          DENOISE: ${{ github.event.inputs.denoise }}
+          PAUSE_MODE: ${{ github.event.inputs.pause_mode }}
+        # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python tools/voice_lab.py > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Đã |đã |Lỗi|lỗi|CẢNH BÁO|HTTP [0-9]{3}|Tổng thời lượng|bỏ qua|Bỏ qua|CONN_RESULT" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/step.log" | cut -c1-200; fi
+          exit $rc
+
+      - name: Lưu bản nghe thử
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          TARGET_REPO: phatnh91/dailybreadwithgod
+          VOICE: ${{ github.event.inputs.voice }}
+        run: bash tools/save_voice_preview.sh "$VOICE"

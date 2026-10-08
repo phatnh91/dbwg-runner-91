@@ -1,0 +1,94 @@
+# KHO PUBLIC: chạy việc trên máy miễn phí của GitHub, lấy mã từ kho private và ghi kết quả về kho private.
+# Đặt file này ở .github/workflows/igbackfill.yml của kho public. Cần secret PRIVATE_REPO_TOKEN (Contents: Read and write
+# trên kho private) và các secret như file gốc. Sinh tự động bằng tools/public_runner/make_public.py: đừng sửa tay.
+name: 10 - Dang bu Instagram (phim bo) (kho public)
+
+# Chạy tay: lấy lại video phim bộ đã đăng Facebook (artifact của lần đăng) và đăng lên Instagram.
+on:
+  workflow_dispatch:
+    inputs:
+      series:
+        description: "Tên bộ phim"
+        required: true
+        default: "prodigal-son"
+      episodes:
+        description: "Các tập, cách nhau dấu phẩy"
+        required: true
+        default: "1,2,3,4"
+      probe:
+        description: "1 = chỉ xem thông số video, không đăng"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - channel: en
+            suffix: ""
+          - channel: vi
+            suffix: "_VI"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          pip install requests
+          which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+      - name: Lấy video đã đăng
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          DIRS=""
+          for EP in $(echo "${{ github.event.inputs.episodes }}" | tr ',' ' '); do
+            NAME="series-${{ github.event.inputs.series }}-ep${EP}-${{ matrix.channel }}"
+            RUN=$(gh api "repos/${{ github.repository }}/actions/artifacts?name=$NAME&per_page=20" \
+                  -q '[.artifacts[] | select(.expired==false)] | sort_by(.created_at) | last | .workflow_run.id')
+            if [ -n "$RUN" ] && gh run download "$RUN" -n "$NAME" -D "ig/ep$EP"; then
+              DIRS="$DIRS ig/ep$EP"
+            else
+              echo "Không tìm thấy $NAME"
+            fi
+          done
+          echo "DIRS=$DIRS" >> "$GITHUB_ENV"
+      - name: Đăng Instagram
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          FB_PAGE_ID: ${{ secrets[format('FB_PAGE_ID{0}', matrix.suffix)] }}
+          FB_PAGE_TOKEN: ${{ secrets[format('FB_PAGE_TOKEN{0}', matrix.suffix)] }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PROBE_ONLY: ${{ github.event.inputs.probe }}
+        # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python tools/ig_backfill.py $DIRS > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Đã |đã |Lỗi|lỗi|CẢNH BÁO|HTTP [0-9]{3}|Tổng thời lượng|bỏ qua|Bỏ qua|CONN_RESULT" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/step.log" | cut -c1-200; fi
+          exit $rc
+      - name: Ghi lại đã đăng
+        if: always()
+        run: |
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add channels/${{ matrix.channel }}/posted.csv
+          git diff --cached --quiet && exit 0
+          git commit -m "Instagram: đăng bù phim bộ (${{ matrix.channel }})"
+          for i in 1 2 3 4 5; do git pull --rebase && git push && exit 0; sleep $((i*5)); done
+          exit 1

@@ -1,0 +1,60 @@
+# KHO PUBLIC: chạy việc trên máy miễn phí của GitHub, lấy mã từ kho private và ghi kết quả về kho private.
+# Đặt file này ở .github/workflows/igcheck.yml của kho public. Cần secret PRIVATE_REPO_TOKEN (Contents: Read and write
+# trên kho private) và các secret như file gốc. Sinh tự động bằng tools/public_runner/make_public.py: đừng sửa tay.
+name: 9 - Kiem tra ket noi (kho public)
+
+# Lời Chúa Studio → Kênh đăng → “Kiểm tra kết nối”: kiểm tra mã trang Facebook (còn hạn, đủ quyền),
+# Instagram, YouTube của từng trang. Không đăng gì. Kết quả hiện ngay trên web
+# (đọc từ dòng ::notice title=conn::). Chạy tay trên GitHub với notify=1 để nhận thêm qua Telegram/Slack.
+on:
+  workflow_dispatch:
+    inputs:
+      notify:
+        description: "1 = gửi kết quả qua Telegram/Slack"
+        required: false
+        default: ""
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - channel: en
+            suffix: ""
+          - channel: vi
+            suffix: "_VI"
+          - channel: annhien
+            suffix: "_AN"
+          - channel: luatchoi
+            suffix: "_LC"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Kiểm tra
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          NOTIFY: ${{ inputs.notify }}
+          FB_PAGE_ID: ${{ secrets[format('FB_PAGE_ID{0}', matrix.suffix)] }}
+          FB_PAGE_TOKEN: ${{ secrets[format('FB_PAGE_TOKEN{0}', matrix.suffix)] }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets[format('YT_REFRESH_TOKEN{0}', matrix.suffix)] }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python tools/conn_check.py > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Đã |đã |Lỗi|lỗi|CẢNH BÁO|HTTP [0-9]{3}|Tổng thời lượng|bỏ qua|Bỏ qua|CONN_RESULT" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/step.log" | cut -c1-200; fi
+          exit $rc

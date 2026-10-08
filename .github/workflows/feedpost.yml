@@ -1,0 +1,49 @@
+# KHO PUBLIC: chạy việc trên máy miễn phí của GitHub, lấy mã từ kho private và ghi kết quả về kho private.
+# Đặt file này ở .github/workflows/feedpost.yml của kho public. Cần secret PRIVATE_REPO_TOKEN (Contents: Read and write
+# trên kho private) và các secret như file gốc. Sinh tự động bằng tools/public_runner/make_public.py: đừng sửa tay.
+name: 8 - Dang bai News Feed (anh + chu) (kho public)
+
+on:
+  workflow_dispatch:
+    inputs:
+      post:
+        description: "File bài viết trong thư mục posts/ (ví dụ posts/2026-10-01-thanh-teresa.json)"
+        required: true
+      channel:
+        description: "Chỉ đăng một trang (en hoặc vi). Để trống = cả hai"
+        required: false
+        default: ""
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - channel: en
+            suffix: ""
+          - channel: vi
+            suffix: "_VI"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        if: github.event.inputs.channel == '' || github.event.inputs.channel == matrix.channel
+      - uses: actions/setup-python@v5
+        if: github.event.inputs.channel == '' || github.event.inputs.channel == matrix.channel
+        with:
+          python-version: "3.12"
+      - name: Đăng bài
+        if: github.event.inputs.channel == '' || github.event.inputs.channel == matrix.channel
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          FB_PAGE_ID: ${{ secrets[format('FB_PAGE_ID{0}', matrix.suffix)] }}
+          FB_PAGE_TOKEN: ${{ secrets[format('FB_PAGE_TOKEN{0}', matrix.suffix)] }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          pip install requests
+          python tools/post_feed.py "${{ github.event.inputs.post }}"

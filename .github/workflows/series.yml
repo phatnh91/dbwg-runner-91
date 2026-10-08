@@ -1,0 +1,207 @@
+# KHO PUBLIC: chạy việc trên máy miễn phí của GitHub, lấy mã từ kho private và ghi kết quả về kho private.
+# Đặt file này ở .github/workflows/series.yml của kho public. Cần secret PRIVATE_REPO_TOKEN (Contents: Read and write
+# trên kho private) và các secret như file gốc. Sinh tự động bằng tools/public_runner/make_public.py: đừng sửa tay.
+name: 3 - Phim bo (ghep tap va dang) (kho public)
+
+# Tự động:
+#   - Khi đẩy đủ cảnh vào series/<bộ>/ep<N>/  -> dựng bản xem trước EN + VI, gửi Telegram
+#   - 20:00 giờ VN hằng ngày                  -> đăng tập đang chờ (trừ khi nhắn /skipphim)
+# Chạy tay (tab Actions): publish = "no" chỉ xem trước, "yes" dựng và đăng luôn.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "series/*/ep*/**"
+  workflow_dispatch:
+    inputs:
+      series:
+        description: "Tên bộ phim (thư mục trong series/)"
+        required: true
+        default: "prodigal-son"
+      episode:
+        description: "Tập số"
+        required: true
+        default: "1"
+      publish:
+        description: "Đăng luôn lên Facebook + YouTube?"
+        type: choice
+        options: ["no", "yes"]
+        default: "no"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: series-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      series: ${{ steps.plan.outputs.series }}
+      episode: ${{ steps.plan.outputs.episode }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Xác định việc cần làm
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          IN_SERIES: ${{ github.event.inputs.series }}
+          IN_EPISODE: ${{ github.event.inputs.episode }}
+          IN_PUBLISH: ${{ github.event.inputs.publish }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python series_plan.py plan > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Đã |đã |Lỗi|lỗi|CẢNH BÁO|HTTP [0-9]{3}|Tổng thời lượng|bỏ qua|Bỏ qua|CONN_RESULT" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/step.log" | cut -c1-200; fi
+          exit $rc
+      - name: Lưu việc hủy (nếu có)
+        if: steps.plan.outputs.mode == 'cancelled'
+        run: |
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add -A series/pending.json
+          git commit -m "Hủy đăng phim bộ tập ${{ steps.plan.outputs.episode }}" && git push || true
+
+  episode:
+    needs: plan
+    if: needs.plan.outputs.mode == 'preview' || needs.plan.outputs.mode == 'publish'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - channel: en
+            suffix: ""
+          - channel: vi
+            suffix: "_VI"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Cài ffmpeg và thư viện
+        run: |
+          which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+          pip install -r requirements.txt
+
+      - name: Dựng tập phim
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          DRAFT_VOICE: ${{ needs.plan.outputs.mode == 'preview' && '1' || '' }}  # xem trước: giọng miễn phí
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python series_build.py --series "${{ needs.plan.outputs.series }}" --episode "${{ needs.plan.outputs.episode }}" ${{ needs.plan.outputs.mode == 'publish' && '--no-preview' || '' }} > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Đã |đã |Lỗi|lỗi|CẢNH BÁO|HTTP [0-9]{3}|Tổng thời lượng|bỏ qua|Bỏ qua|CONN_RESULT" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/step.log" | cut -c1-200; fi
+          exit $rc
+      - name: Lưu bản xem trước cho Lời Chúa Studio
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          TARGET_REPO: phatnh91/dailybreadwithgod
+        run: bash tools/save_preview.sh "series-${{ needs.plan.outputs.series }}-ep${{ needs.plan.outputs.episode }}-${{ matrix.channel }}" "${{ matrix.channel }}"
+
+      - name: Lưu video
+        uses: actions/upload-artifact@v4
+        with:
+          name: series-${{ needs.plan.outputs.series }}-ep${{ needs.plan.outputs.episode }}-${{ matrix.channel }}
+          path: out/${{ matrix.channel }}/
+          retention-days: 14
+
+      - name: Đăng lên Facebook + YouTube
+        if: needs.plan.outputs.mode == 'publish'
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          FB_PAGE_ID: ${{ secrets[format('FB_PAGE_ID{0}', matrix.suffix)] }}
+          FB_PAGE_TOKEN: ${{ secrets[format('FB_PAGE_TOKEN{0}', matrix.suffix)] }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets[format('YT_REFRESH_TOKEN{0}', matrix.suffix)] }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python publish.py > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Đã |đã |Lỗi|lỗi|CẢNH BÁO|HTTP [0-9]{3}|Tổng thời lượng|bỏ qua|Bỏ qua|CONN_RESULT" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/step.log" | cut -c1-200; fi
+          exit $rc
+
+      - name: Ghi lại tập đã đăng
+        if: always() && needs.plan.outputs.mode == 'publish'
+        run: |
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add channels/${{ matrix.channel }}/posted.csv 2>/dev/null || exit 0
+          git diff --cached --quiet && exit 0
+          git commit -m "Đã đăng phim bộ ${{ needs.plan.outputs.series }} tập ${{ needs.plan.outputs.episode }} (${{ matrix.channel }})"
+          for i in 1 2 3 4 5; do
+            git pull --rebase && git push && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
+
+  finish:
+    needs: [plan, episode]
+    if: always() && needs.episode.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Hẹn giờ đăng / dọn hàng chờ
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ "${{ needs.plan.outputs.mode }}" = "preview" ]; then
+            python series_plan.py pending "${{ needs.plan.outputs.series }}" "${{ needs.plan.outputs.episode }}"
+          else
+            python series_plan.py done
+          fi
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add -A series/pending.json
+          git diff --cached --quiet && exit 0
+          git commit -m "Phim bộ: cập nhật hàng chờ (tập ${{ needs.plan.outputs.episode }})"
+          for i in 1 2 3 4 5; do
+            git pull --rebase && git push && exit 0
+            sleep $((i * 5))
+          done
+          exit 1

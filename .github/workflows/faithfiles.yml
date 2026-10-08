@@ -1,0 +1,320 @@
+# KHO PUBLIC: chạy việc trên máy miễn phí của GitHub, lấy mã từ kho private và ghi kết quả về kho private.
+# Đặt file này ở .github/workflows/faithfiles.yml của kho public. Cần secret PRIVATE_REPO_TOKEN (Contents: Read and write
+# trên kho private) và các secret như file gốc. Sinh tự động bằng tools/public_runner/make_public.py: đừng sửa tay.
+name: 5 - Ho So Duc Tin (Faith Files) (kho public)
+
+# Thứ Ba, Năm, Bảy:
+#   ~13:17 giờ VN  tạo tập mới (kịch bản song ngữ + hình), dựng bản EN + VI, gửi xem trước qua Telegram
+#   ~20:23 giờ VN  đăng lên 2 trang Lời Chúa (trừ khi nhắn /skiphoso), 21:08 là lịch dự phòng
+# Chạy tay: action = preview (tạo tập mới, có thể chọn topic) hoặc publish (đăng tập đang chờ ngay).
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        type: choice
+        options: ["preview", "publish"]
+        default: "preview"
+      topic:
+        description: "Mã chủ đề trong files/topics.csv (để trống = chủ đề tiếp theo)"
+        required: false
+        default: ""
+      auto:
+        description: "1 = chạy từ lịch hẹn giờ bên ngoài (cron-job.org): bỏ qua nếu hôm nay đã làm rồi"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: faithfiles
+  cancel-in-progress: false
+
+jobs:
+  mode:
+    runs-on: ubuntu-latest
+    outputs:
+      action: ${{ steps.m.outputs.action }}
+    steps:
+      - id: m
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "action=${{ github.event.inputs.action }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "17 6 * * 2,4,6" ]; then
+            echo "action=preview" >> "$GITHUB_OUTPUT"
+          else
+            echo "action=publish" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------- tạo tập mới + xem trước
+  prepare:
+    needs: mode
+    if: needs.mode.outputs.action == 'preview'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      id: ${{ steps.p.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Viết kịch bản và tạo hình
+        id: p
+        env:
+          CHANNEL: en
+          TOPIC: ${{ github.event.inputs.topic }}
+          AUTO: ${{ (github.event_name == 'schedule' || github.event.inputs.auto == '1') && '1' || '' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
+          AI_PROVIDERS: ${{ vars.XOAI_AI_PROVIDERS }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python files_build.py prepare > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Đã |đã |Lỗi|lỗi|CẢNH BÁO|HTTP [0-9]{3}|Tổng thời lượng|bỏ qua|Bỏ qua|CONN_RESULT" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/step.log" | cut -c1-200; fi
+          exit $rc
+      - uses: actions/upload-artifact@v4
+        if: steps.p.outputs.id != ''
+        with:
+          name: files-src-${{ steps.p.outputs.id }}
+          path: files/work/
+          retention-days: 7
+
+  render:
+    needs: prepare
+    if: needs.prepare.outputs.id != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: [en, vi]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Cài ffmpeg và thư viện
+        run: |
+          which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+          pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: files-src-${{ needs.prepare.outputs.id }}
+          path: files/work/
+      - name: Dựng video
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          DRAFT_VOICE: "1"   # bản xem trước: giọng Edge miễn phí
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
+          AI_PROVIDERS: ${{ vars.XOAI_AI_PROVIDERS }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python files_build.py render > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Đã |đã |Lỗi|lỗi|CẢNH BÁO|HTTP [0-9]{3}|Tổng thời lượng|bỏ qua|Bỏ qua|CONN_RESULT" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/step.log" | cut -c1-200; fi
+          exit $rc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: files-${{ needs.prepare.outputs.id }}-${{ matrix.channel }}
+          path: out/${{ matrix.channel }}/
+          retention-days: 7
+
+  queue:
+    needs: [prepare, render]
+    if: needs.render.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Ghi tập đang chờ đăng
+        run: |
+          python files_build.py pending "${{ needs.prepare.outputs.id }}"
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add files/pending.json
+          git commit -m "Hồ sơ: chờ đăng ${{ needs.prepare.outputs.id }}"
+          for i in 1 2 3 4 5; do git pull --rebase && git push && exit 0; sleep $((i * 5)); done
+          exit 1
+
+  # ---------------- đăng
+  plan:
+    needs: mode
+    if: needs.mode.outputs.action == 'publish'
+    runs-on: ubuntu-latest
+    outputs:
+      id: ${{ steps.p.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Có tập nào chờ đăng không
+        id: p
+        env:
+          EVENT: ${{ github.event_name }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          python files_build.py publish-plan
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add -A files/pending.json files/done.csv 2>/dev/null || true
+          git diff --cached --quiet && exit 0
+          git commit -m "Hồ sơ: hủy tập theo yêu cầu"
+          for i in 1 2 3 4 5; do git pull --rebase && git push && exit 0; sleep $((i * 5)); done
+
+  publish:
+    needs: plan
+    if: needs.plan.outputs.id != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - channel: en
+            suffix: ""
+          - channel: vi
+            suffix: "_VI"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cài ffmpeg và thư viện
+        run: |
+          which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+          pip install -r requirements.txt
+      - name: Lấy kịch bản và hình đã duyệt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          NAME="files-src-${{ needs.plan.outputs.id }}"
+          for RUN_ID in $(gh run list --workflow faithfiles.yml --limit 20 --json databaseId -q '.[].databaseId'); do
+            if gh run download "$RUN_ID" -n "$NAME" -D files/work/ 2>/dev/null; then
+              echo "Đã lấy $NAME từ lần chạy $RUN_ID"; exit 0
+            fi
+          done
+          echo "Không tìm thấy $NAME"; exit 1
+      - name: Dựng lại bằng giọng chính
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
+          AI_PROVIDERS: ${{ vars.XOAI_AI_PROVIDERS }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python files_build.py render --no-preview > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Đã |đã |Lỗi|lỗi|CẢNH BÁO|HTTP [0-9]{3}|Tổng thời lượng|bỏ qua|Bỏ qua|CONN_RESULT" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/step.log" | cut -c1-200; fi
+          exit $rc
+      - name: Đăng lên Facebook + YouTube
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          FB_PAGE_ID: ${{ secrets[format('FB_PAGE_ID{0}', matrix.suffix)] }}
+          FB_PAGE_TOKEN: ${{ secrets[format('FB_PAGE_TOKEN{0}', matrix.suffix)] }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets[format('YT_REFRESH_TOKEN{0}', matrix.suffix)] }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
+        run: |
+          set +e
+          python publish.py > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Đã |đã |Lỗi|lỗi|CẢNH BÁO|HTTP [0-9]{3}|Tổng thời lượng|bỏ qua|Bỏ qua|CONN_RESULT" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/step.log" | cut -c1-200; fi
+          exit $rc
+      - name: Ghi lại đã đăng
+        if: always()
+        run: |
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add channels/${{ matrix.channel }}/posted.csv 2>/dev/null || exit 0
+          git diff --cached --quiet && exit 0
+          git commit -m "Đã đăng hồ sơ ${{ needs.plan.outputs.id }} (${{ matrix.channel }})"
+          for i in 1 2 3 4 5; do git pull --rebase && git push && exit 0; sleep $((i * 5)); done
+          exit 1
+
+  finish:
+    needs: [plan, publish]
+    if: needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: |
+          git pull --rebase
+          python files_build.py done "${{ needs.plan.outputs.id }}"
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add -A files/pending.json files/done.csv
+          git diff --cached --quiet && exit 0
+          git commit -m "Hồ sơ: đã đăng ${{ needs.plan.outputs.id }}"
+          for i in 1 2 3 4 5; do git pull --rebase && git push && exit 0; sleep $((i * 5)); done
+          exit 1

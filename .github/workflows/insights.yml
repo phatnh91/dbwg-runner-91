@@ -1,0 +1,92 @@
+# KHO PUBLIC: chạy việc trên máy miễn phí của GitHub, lấy mã từ kho private và ghi kết quả về kho private.
+# Đặt file này ở .github/workflows/insights.yml của kho public. Cần secret PRIVATE_REPO_TOKEN (Contents: Read and write
+# trên kho private) và các secret như file gốc. Sinh tự động bằng tools/public_runner/make_public.py: đừng sửa tay.
+name: 4 - So lieu va bao cao tuan (kho public)
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Chỉ chạy một trang (en, vi, annhien hoặc luatchoi). Để trống = tất cả"
+        required: false
+        default: ""
+      report:
+        description: "Gửi báo cáo tuần ngay (true/false)"
+        required: false
+        default: "true"
+
+permissions:
+  contents: write
+
+jobs:
+  insights:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 1   # ghi file lần lượt để khỏi đụng nhau khi push
+      matrix:
+        include:
+          - channel: en
+            suffix: ""
+          - channel: vi
+            suffix: "_VI"
+          - channel: annhien
+            suffix: "_AN"
+          - channel: luatchoi
+            suffix: "_LC"
+    steps:
+      - name: Kiểm tra có chạy trang này không
+        id: gate
+        run: |
+          if [ -n "${{ github.event.inputs.channel }}" ] && [ "${{ github.event.inputs.channel }}" != "${{ matrix.channel }}" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        if: steps.gate.outputs.run == 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Cài thư viện
+        if: steps.gate.outputs.run == 'true'
+        run: pip install requests
+
+      - name: Cập nhật số liệu
+        if: steps.gate.outputs.run == 'true'
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          SECRET_SUFFIX: ${{ matrix.suffix }}
+          FB_PAGE_ID: ${{ secrets[format('FB_PAGE_ID{0}', matrix.suffix)] }}
+          FB_PAGE_TOKEN: ${{ secrets[format('FB_PAGE_TOKEN{0}', matrix.suffix)] }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ "${{ github.event.inputs.report }}" = "true" ]; then
+            python insights.py --report
+          else
+            python insights.py
+          fi
+
+      - name: Lưu số liệu
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          for f in stats.csv followers.csv; do if [ -f "channels/${{ matrix.channel }}/$f" ]; then git add "channels/${{ matrix.channel }}/$f"; fi; done
+          git diff --cached --quiet && exit 0
+          git commit -m "Số liệu ${{ matrix.channel }}: $(date -u +%F)"
+          for i in 1 2 3 4 5; do
+            git pull --rebase && git push && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
