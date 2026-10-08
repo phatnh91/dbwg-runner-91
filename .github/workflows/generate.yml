@@ -1,8 +1,7 @@
-# KHO PUBLIC (thử nghiệm): chạy "Tạo video" trên máy miễn phí của GitHub, lấy mã và ghi kết quả về kho private.
-# Đặt file này ở .github/workflows/generate.yml của kho public. Cần: secret PRIVATE_REPO_TOKEN (Contents: Read and write
-# trên kho private), các secret như generate.yml gốc, và biến repo XOAI_AI_PROVIDERS nếu kho private có dùng.
-# Sinh tự động từ .github/workflows/generate.yml: sửa file gốc thì sinh lại, đừng sửa tay hai nơi.
-name: 1 - Tao video (kho public, thu nghiem)
+# KHO PUBLIC: chạy việc trên máy miễn phí của GitHub, lấy mã từ kho private và ghi kết quả về kho private.
+# Đặt file này ở .github/workflows/generate.yml của kho public. Cần secret PRIVATE_REPO_TOKEN (Contents: Read and write
+# trên kho private) và các secret như file gốc. Sinh tự động bằng tools/public_runner/make_public.py: đừng sửa tay.
+name: 1 - Tao video (kho public)
 
 on:
   workflow_dispatch:

@@ -1,0 +1,78 @@
+# KHO PUBLIC: chạy việc trên máy miễn phí của GitHub, lấy mã từ kho private và ghi kết quả về kho private.
+# Đặt file này ở .github/workflows/dispatch.yml của kho public. Cần secret PRIVATE_REPO_TOKEN (Contents: Read and write
+# trên kho private) và các secret như file gốc. Sinh tự động bằng tools/public_runner/make_public.py: đừng sửa tay.
+name: 0 - Dieu phoi (kho public, goi tu cron-job.org)
+
+# cron-job.org gọi workflow này vào phút 45 của các giờ 7, 9, 11, 13, 18, 20 (giờ Việt Nam) — hoặc mỗi giờ.
+# Việc chạy ở mỗi giờ lấy từ schedule.json (sửa trong Lời Chúa Studio → Lịch đăng); thiếu file thì theo lịch cũ dưới đây.
+# Workflow xem giờ hiện tại rồi chạy đúng việc (lịch GitHub vẫn giữ làm dự phòng, chạy trùng không sao:
+# video đã tạo / đã đăng thì bot tự bỏ qua).
+#   07:45  tạo video lượt 12:00 của annhien; Podcast: tập mới mỗi ngày (kịch bản + giọng + tự nhép miệng + ghép)
+#   09:45  tạo video lượt chính của mọi trang
+#   11:45  đăng lượt 12:00 của annhien
+#   13:45  Hồ Sơ Đức Tin: tạo tập mới + xem trước (thứ 3, 5, 7)
+#   18:45  đăng trang en, vi; Podcast An Nhiên: đăng tập đang chờ (hằng ngày, nếu có)
+#   20:45  đăng lượt tối của annhien; Hồ Sơ Đức Tin: đăng (thứ 3, 5, 7)
+on:
+  workflow_dispatch:
+    inputs:
+      at:
+        description: "Giả lập giờ (07, 09, 11, 13, 18, 20) để chạy thử. Để trống = giờ hiện tại"
+        required: false
+        default: ""
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          sparse-checkout: tools   # chế độ cone: luôn có kèm các file ở thư mục gốc (schedule.json)
+      - name: Chạy việc theo giờ
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          H="${{ github.event.inputs.at }}"
+          # Chống gọi dồn: cron-job.org chỉ nên gọi phút 45. Gọi lệch phút (ví dụ cài nhầm "mỗi phút") thì bỏ qua,
+          # và mỗi giờ chỉ lần gọi đầu tiên (từ phút 40 trở đi) được chạy việc; các lần sau bỏ qua.
+          if [ -z "$H" ]; then
+            MIN=$(TZ=Asia/Ho_Chi_Minh date +%M)
+            if [ "$((10#$MIN))" -lt 40 ]; then echo "Phút $MIN chưa tới phút 45 — bỏ qua"; exit 0; fi
+            START=$(date -u -d "$(TZ=Asia/Ho_Chi_Minh date +%Y-%m-%dT%H):40:00+07:00" +%Y-%m-%dT%H:%M:%SZ)
+            FIRST=$(gh run list --workflow dispatch.yml --limit 100 --json databaseId,createdAt \
+              --jq "[.[] | select(.createdAt >= \"$START\")] | min_by(.createdAt) | .databaseId" 2>/dev/null || true)
+            if [ -n "$FIRST" ] && [ "$FIRST" != "${{ github.run_id }}" ]; then echo "Giờ này đã có lần gọi khác chạy ($FIRST) — bỏ qua"; exit 0; fi
+          fi
+          [ -n "$H" ] || H=$(TZ=Asia/Ho_Chi_Minh date +%H)
+          # Lịch sửa trong Lời Chúa Studio (schedule.json). Không có file thì chạy theo lịch cũ bên dưới.
+          PLAN=$(python3 tools/schedule_gate.py dispatch "$H" 2>/dev/null || echo LEGACY)
+          if [ "$PLAN" != "LEGACY" ]; then
+            echo "Giờ VN: $H — theo schedule.json"
+            [ -z "$PLAN" ] && { echo "Giờ $H không có việc gì"; exit 0; }
+            while IFS= read -r line; do [ -n "$line" ] && { echo "→ gh workflow run $line"; gh workflow run $line || echo "(kho public chưa có workflow này, bỏ qua)"; }; done <<< "$PLAN"
+            exit 0
+          fi
+          DOW=$(TZ=Asia/Ho_Chi_Minh date +%u)   # 1 = thứ Hai ... 7 = Chủ nhật
+          HOSO=false; case "$DOW" in 2|4|6) HOSO=true;; esac
+          POD=false; case "$DOW" in 1|4) POD=true;; esac
+          echo "Giờ VN: $H, thứ (1=T2): $DOW"
+          run() { echo "→ gh workflow run $*"; gh workflow run "$@" || echo "(kho public chưa có workflow này, bỏ qua)"; }
+          case "$H" in
+            07) run generate.yml -f channel=annhien -f slot=noon -f auto=1
+                run podcast.yml -f action=plan -f auto=1 ;;
+            09) run generate.yml -f slot=main -f auto=1 ;;
+            11) run publish.yml -f channel=annhien -f slot=noon -f auto=1 ;;
+            13) $HOSO && run faithfiles.yml -f action=preview -f auto=1 || echo "Hôm nay không có Hồ Sơ" ;;
+            18) run publish.yml -f channel=en,vi,luatchoi -f slot=main -f auto=1
+                run podcast.yml -f action=publish -f auto=1 ;;
+            20) run publish.yml -f channel=annhien -f slot=main -f auto=1
+                $HOSO && run faithfiles.yml -f action=publish -f auto=1 || true ;;
+            *)  echo "Giờ $H không có việc gì" ;;
+          esac
