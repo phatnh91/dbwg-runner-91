@@ -65,7 +65,7 @@ jobs:
           set +e
           python viethoa_build.py "${{ github.event.inputs.step || 'source' }}" --project "${{ github.event.inputs.project }}" --rev "${{ github.event.inputs.rev }}" ${{ github.event.inputs.force == 'yes' && '--force' || '' }} > "$RUNNER_TEMP/step.log" 2>&1
           rc=$?
-          grep -E "::(notice|warning|error)|✅|❌|⚠|Video hợp lệ|Nguồn và cài đặt|Bản dịch đã có|STT |Gemini|AI lỗi|AI đang dùng|AI dự phòng|Lô [0-9]|đã cũ|lượt khác|xóa translation" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Video hợp lệ|Nguồn và cài đặt|Bản dịch đã có|STT |Whisper|Gemini|AI lỗi|AI đang dùng|AI dự phòng|Lô [0-9]|đã cũ|lượt khác|xóa translation" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
           if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 6 dòng cuối:"; tail -n 6 "$RUNNER_TEMP/step.log" | cut -c1-160; fi
           exit $rc
       - name: Ghi loi neu may chay chet giua chung
