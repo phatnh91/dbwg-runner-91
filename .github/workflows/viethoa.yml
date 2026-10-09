@@ -3,7 +3,7 @@ name: 10 - Viet hoa video tieng Trung (kho public)
 # Việc nặng của "Việt hóa video tiếng Trung": kiểm tra video, tách âm thanh/phụ đề, nhận giọng nói, ghi kết quả về kho private.
 # Đặt ở .github/workflows/viethoa.yml của kho public (tools/public_runner/sync_public.bat tự chép). Cần secret PRIVATE_REPO_TOKEN;
 # Bước dịch dùng chuỗi AI của bot (GROQ_API_KEY / NVIDIA_API_KEY miễn phí trước, rồi GEMINI_API_KEY hoặc AI_PROVIDERS + AI_CONFIG_SECRET).
-# Bước dựng vietsub lưu video vào nhánh previews của kho private (cùng cách các video khác) nên dùng PRIVATE_REPO_TOKEN.
+# Bước dựng lưu video vào R2 nếu dự án dùng kho R2 (secrets R2_*), nếu không thì vào nhánh previews của kho private (PRIVATE_REPO_TOKEN).
 # GEMINI_API_KEY cho bước nhận giọng nói chỉ dùng khi viethoa.stt_engine = "auto" trong config.json.
 # Log của kho public ai cũng đọc được: chỉ in trạng thái và số liệu, không bao giờ in nội dung phụ đề.
 on:
@@ -97,6 +97,10 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
           TARGET_REPO: phatnh91/dailybreadwithgod
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -107,7 +111,7 @@ jobs:
           set +e
           python viethoa_build.py "${{ github.event.inputs.step || 'source' }}" --project "${{ github.event.inputs.project }}" --rev "${{ github.event.inputs.rev }}" ${{ github.event.inputs.step == 'render' && format('--variant {0}', github.event.inputs.variant == 'voice' && 'voice' || 'sub') || '' }} ${{ github.event.inputs.force == 'yes' && '--force' || '' }} > "$RUNNER_TEMP/step.log" 2>&1
           rc=$?
-          grep -E "::(notice|warning|error)|✅|❌|⚠|Video hợp lệ|Video |Đã lưu xem trước|Chưa lưu|bitrate|Bản đã dựng|Video vietsub|Giọng đọc|Edge TTS|Nguồn và cài đặt|Bản dịch đã có|STT |Whisper|Gemini|AI lỗi|AI đang dùng|AI dự phòng|Lô [0-9]|đã cũ|lượt khác|xóa translation" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Video hợp lệ|Video |Đã lưu xem trước|Chưa lưu|bitrate|Bản đã dựng|Video vietsub|Giọng đọc|Edge TTS|kho R2|Nguồn và cài đặt|Bản dịch đã có|STT |Whisper|Gemini|AI lỗi|AI đang dùng|AI dự phòng|Lô [0-9]|đã cũ|lượt khác|xóa translation" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
           if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 6 dòng cuối:"; tail -n 6 "$RUNNER_TEMP/step.log" | cut -c1-160; fi
           exit $rc
       - name: Dang video / kiem tra ket noi kenh dang
@@ -115,6 +119,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
           TARGET_REPO: phatnh91/dailybreadwithgod
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
           # Mã của kênh đăng lấy theo đuôi tên secret (vd _VH1 -> FB_PAGE_ID_VH1). Kênh en dùng secret không đuôi.
           FB_PAGE_ID: ${{ secrets[format('FB_PAGE_ID{0}', github.event.inputs.suffix)] }}
           FB_PAGE_TOKEN: ${{ secrets[format('FB_PAGE_TOKEN{0}', github.event.inputs.suffix)] }}
