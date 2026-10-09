@@ -1,0 +1,81 @@
+name: 9b - Nghe thu giong Edge (kho public)
+
+# Đọc cùng một đoạn tiếng Việt bằng nhiều giọng Edge TTS miễn phí rồi gửi từng file qua Telegram để nghe so sánh.
+# Không đăng gì, không dùng quota AI. Chỉ cần secret TELEGRAM_BOT_TOKEN và TELEGRAM_CHAT_ID của kho public.
+on:
+  workflow_dispatch:
+    inputs:
+      text:
+        description: "Đoạn thử đọc (tiếng Việt)"
+        required: false
+        default: "Phàm việc chi cũng phải tạ ơn Chúa, vì ý muốn của Đức Chúa Trời trong Đức Chúa Giê-xu Christ đối với anh em là như vậy. Hôm nay bạn hãy dừng lại một chút, thở chậm, và nói lời cảm ơn cho những điều còn ở lại bên mình."
+      rate:
+        description: "Tốc độ Edge (ví dụ -5%, +0%, -10%)"
+        required: false
+        default: "-5%"
+      voices:
+        description: "Danh sách giọng, cách nhau dấu phẩy (trống = 6 giọng mặc định)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  lab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cài edge-tts
+        run: pip install edge-tts requests
+
+      - name: Đọc thử và gửi Telegram
+        env:
+          TEXT: ${{ github.event.inputs.text }}
+          RATE: ${{ github.event.inputs.rate }}
+          VOICES: ${{ github.event.inputs.voices }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python - <<'PY'
+          import asyncio, os, requests
+          import edge_tts
+
+          TOKEN, CHAT = os.environ["TELEGRAM_BOT_TOKEN"], os.environ["TELEGRAM_CHAT_ID"]
+          API = f"https://api.telegram.org/bot{TOKEN}"
+          TEXT = os.environ["TEXT"].strip()
+          RATE = os.environ.get("RATE", "-5%").strip() or "-5%"
+          DEFAULT = ["vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural", "en-US-AndrewMultilingualNeural",
+                     "en-US-AvaMultilingualNeural", "en-US-BrianMultilingualNeural", "en-US-EmmaMultilingualNeural"]
+          voices = [v.strip() for v in os.environ.get("VOICES", "").split(",") if v.strip()] or DEFAULT
+
+          def say(text):
+              requests.post(f"{API}/sendMessage", data={"chat_id": CHAT, "text": text}, timeout=30)
+
+          async def run():
+              allv = await edge_tts.list_voices()
+              vi = sorted(f"{v['ShortName']} ({v['Gender']})" for v in allv if v["Locale"] == "vi-VN")
+              multi = sorted(v["ShortName"] for v in allv if "Multilingual" in v["ShortName"])
+              say(f"[Nghe thử giọng Edge]\nGiọng vi-VN hiện có: {', '.join(vi) or 'không có'}\n"
+                  f"Giọng Multilingual ({len(multi)}): {', '.join(multi)[:1500]}\nTốc độ: {RATE}. Đang gửi {len(voices)} bản nghe thử...")
+              names = {v["ShortName"] for v in allv}
+              for v in voices:
+                  if v not in names:
+                      say(f"Giọng {v} không có trong danh sách Edge, bỏ qua.")
+                      continue
+                  path = f"{v}.mp3"
+                  try:
+                      await edge_tts.Communicate(TEXT, v, rate=RATE).save(path)
+                      with open(path, "rb") as f:
+                          r = requests.post(f"{API}/sendAudio", data={"chat_id": CHAT, "title": v, "caption": v},
+                                            files={"audio": (path, f, "audio/mpeg")}, timeout=120)
+                      print(v, r.status_code)
+                  except Exception as e:
+                      say(f"Giọng {v} lỗi: {str(e)[:200]}")
+
+          asyncio.run(run())
+          PY
