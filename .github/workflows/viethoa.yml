@@ -17,13 +17,25 @@ on:
         required: false
         default: "0"
       step:
-        description: "source = lấy chữ tiếng Trung | translate = dịch sang tiếng Việt (dừng lại chờ duyệt) | render = dựng vietsub từ bản dịch đã duyệt"
+        description: "source = lấy chữ gốc | translate = dịch sang tiếng Việt (dừng lại chờ duyệt) | render = dựng vietsub hoặc giọng đọc từ bản dịch đã duyệt | publish = đăng video đã dựng | check = kiểm tra kết nối kênh đăng"
         required: false
         default: "source"
       force:
         description: "yes = bỏ qua kết quả đã lưu, làm lại từ đầu"
         required: false
         default: "no"
+      variant:
+        description: "Bước render: sub = chỉ vietsub | voice = giọng đọc tiếng Việt"
+        required: false
+        default: "sub"
+      suffix:
+        description: "Bước publish/check: đuôi tên secret của kênh đăng (vd _VH1; để trống = kênh en). Chỉ chữ HOA, số, _"
+        required: false
+        default: ""
+      target:
+        description: "Bước check: mã kênh đăng (t-xxxx)"
+        required: false
+        default: ""
 
 # Một dự án chỉ chạy một lượt một lúc; bấm trùng thì lượt sau xếp hàng chờ (không hủy lượt đang chạy)
 concurrency:
@@ -42,19 +54,45 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Kiem tra dau vao
+        env:
+          SUFFIX: ${{ github.event.inputs.suffix }}
+          STEP: ${{ github.event.inputs.step }}
+        run: |
+          [[ "$SUFFIX" =~ ^[A-Z0-9_]{0,12}$ ]] || { echo "::error::Đuôi mã kênh đăng không hợp lệ"; exit 1; }
+          case "$STEP" in source|translate|render|publish|check) ;; *) echo "::error::Bước không hợp lệ"; exit 1;; esac
       - name: Cai ffmpeg va thu vien
+        env:
+          STEP: ${{ github.event.inputs.step }}
+          VARIANT: ${{ github.event.inputs.variant }}
         run: |
           which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
-          if [ "${{ github.event.inputs.step }}" = "render" ]; then sudo apt-get install -y fonts-noto-core fonts-dejavu-core fontconfig || true; fi
+          if [ "$STEP" = "render" ]; then sudo apt-get install -y fonts-noto-core fonts-dejavu-core fontconfig || true; fi
           pip install requests numpy
-          [ "${{ github.event.inputs.step }}" = "translate" ] || [ "${{ github.event.inputs.step }}" = "render" ] || pip install faster-whisper || echo "::warning title=Whisper::Không cài được faster-whisper, bước nhận giọng nói sẽ báo lỗi, hãy dùng file SRT/VTT"
+          if [ "$STEP" = "render" ] && [ "$VARIANT" = "voice" ]; then pip install edge-tts || echo "::warning title=Giong doc::Không cài được edge-tts, bước giọng đọc sẽ báo lỗi"; fi
+          case "$STEP" in translate|render|publish|check) ;; *) pip install faster-whisper || echo "::warning title=Whisper::Không cài được faster-whisper, bước nhận giọng nói sẽ báo lỗi, hãy dùng file SRT/VTT";; esac
+      - name: Cai OCR (chi khi du an doc chu tren hinh)
+        if: github.event.inputs.step == 'source'
+        env:
+          PROJECT: ${{ github.event.inputs.project }}
+        run: |
+          INFO=$(python3 -c "import json,os;p=json.load(open('viethoa/%s/project.json' % os.environ['PROJECT']));print(p.get('mode',''),p.get('language','zh'))" 2>/dev/null || echo "")
+          set -- $INFO
+          if [ "$1" = "ocr" ]; then
+            case "$2" in zh) PK=chi-sim;; en) PK=;; ja) PK=jpn;; ko) PK=kor;; th) PK=tha;; id) PK=ind;; fr) PK=fra;; de) PK=deu;; es) PK=spa;; pt) PK=por;; it) PK=ita;; ru) PK=rus;; hi) PK=hin;; ar) PK=ara;; *) PK=;; esac
+            sudo apt-get update -qq || true
+            sudo apt-get install -y -qq tesseract-ocr ${PK:+tesseract-ocr-$PK} libgl1 || echo "::warning title=OCR::Không cài được Tesseract"
+            pip install pillow
+            if [ "$2" = "zh" ] || [ "$2" = "en" ]; then pip install rapidocr-onnxruntime || echo "::warning title=OCR::Không cài được RapidOCR, sẽ dùng Tesseract (kém chính xác hơn với chữ Hán)"; fi
+          fi
       - name: Giu lai model Whisper giua cac lan chay
-        if: github.event.inputs.step != 'translate' && github.event.inputs.step != 'render'
+        if: github.event.inputs.step == 'source'
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
           key: whisper-models-v1
-      - name: Xu ly (lay chu hoac dich)
+      - name: Xu ly (lay chu, dich, dung video)
+        if: github.event.inputs.step != 'publish' && github.event.inputs.step != 'check'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
@@ -67,11 +105,38 @@ jobs:
           AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
         run: |
           set +e
-          python viethoa_build.py "${{ github.event.inputs.step || 'source' }}" --project "${{ github.event.inputs.project }}" --rev "${{ github.event.inputs.rev }}" ${{ github.event.inputs.force == 'yes' && '--force' || '' }} > "$RUNNER_TEMP/step.log" 2>&1
+          python viethoa_build.py "${{ github.event.inputs.step || 'source' }}" --project "${{ github.event.inputs.project }}" --rev "${{ github.event.inputs.rev }}" ${{ github.event.inputs.step == 'render' && format('--variant {0}', github.event.inputs.variant == 'voice' && 'voice' || 'sub') || '' }} ${{ github.event.inputs.force == 'yes' && '--force' || '' }} > "$RUNNER_TEMP/step.log" 2>&1
           rc=$?
-          grep -E "::(notice|warning|error)|✅|❌|⚠|Video hợp lệ|Video |Đã lưu xem trước|Chưa lưu|bitrate|Bản đã dựng|Video vietsub|Nguồn và cài đặt|Bản dịch đã có|STT |Whisper|Gemini|AI lỗi|AI đang dùng|AI dự phòng|Lô [0-9]|đã cũ|lượt khác|xóa translation" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          grep -E "::(notice|warning|error)|✅|❌|⚠|Video hợp lệ|Video |Đã lưu xem trước|Chưa lưu|bitrate|Bản đã dựng|Video vietsub|Giọng đọc|Edge TTS|Nguồn và cài đặt|Bản dịch đã có|STT |Whisper|Gemini|AI lỗi|AI đang dùng|AI dự phòng|Lô [0-9]|đã cũ|lượt khác|xóa translation" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 6 dòng cuối:"; tail -n 6 "$RUNNER_TEMP/step.log" | cut -c1-160; fi
+          exit $rc
+      - name: Dang video / kiem tra ket noi kenh dang
+        if: github.event.inputs.step == 'publish' || github.event.inputs.step == 'check'
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          TARGET_REPO: phatnh91/dailybreadwithgod
+          # Mã của kênh đăng lấy theo đuôi tên secret (vd _VH1 -> FB_PAGE_ID_VH1). Kênh en dùng secret không đuôi.
+          FB_PAGE_ID: ${{ secrets[format('FB_PAGE_ID{0}', github.event.inputs.suffix)] }}
+          FB_PAGE_TOKEN: ${{ secrets[format('FB_PAGE_TOKEN{0}', github.event.inputs.suffix)] }}
+          YT_REFRESH_TOKEN: ${{ secrets[format('YT_REFRESH_TOKEN{0}', github.event.inputs.suffix)] }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STEP: ${{ github.event.inputs.step }}
+          PROJECT: ${{ github.event.inputs.project }}
+          REV: ${{ github.event.inputs.rev }}
+          TARGET: ${{ github.event.inputs.target }}
+          SUFFIX: ${{ github.event.inputs.suffix }}
+        run: |
+          set +e
+          if [ "$STEP" = "check" ]; then python viethoa_build.py check-target --target "$TARGET" --suffix "$SUFFIX" > "$RUNNER_TEMP/step.log" 2>&1
+          else python viethoa_build.py publish --project "$PROJECT" --rev "$REV" > "$RUNNER_TEMP/step.log" 2>&1; fi
+          rc=$?
+          # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái, không có nội dung bài đăng và không có mã
+          grep -E "✅|❌|⚠|Facebook|YouTube|Instagram|Video hợp lệ|lượt khác|đã cũ" "$RUNNER_TEMP/step.log" | cut -c1-200 | head -30
           if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 6 dòng cuối:"; tail -n 6 "$RUNNER_TEMP/step.log" | cut -c1-160; fi
           exit $rc
       - name: Ghi loi neu may chay chet giua chung
-        if: failure() || cancelled()
+        if: (failure() || cancelled()) && github.event.inputs.step != 'check'
         run: python viethoa_build.py mark-failed --project "${{ github.event.inputs.project }}"
