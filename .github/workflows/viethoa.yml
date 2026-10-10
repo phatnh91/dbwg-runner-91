@@ -61,16 +61,53 @@ jobs:
         run: |
           [[ "$SUFFIX" =~ ^[A-Z0-9_]{0,12}$ ]] || { echo "::error::Đuôi mã kênh đăng không hợp lệ"; exit 1; }
           case "$STEP" in source|translate|render|publish|check) ;; *) echo "::error::Bước không hợp lệ"; exit 1;; esac
+      - name: Giu lai ffmpeg giua cac lan chay
+        uses: actions/cache@v4
+        with:
+          path: ~/ffmpeg-static
+          key: ffmpeg-static-v1-${{ runner.os }}
+      - name: Giu lai thu vien Python giua cac lan chay
+        # Hai bo thu vien: "src" (buoc lay chu: Whisper + OCR, nang) va "light" (dich / dung / dang, nhe) de cac buoc nhe khong phai tai cache lon
+        uses: actions/cache@v4
+        with:
+          path: ~/vh-venv
+          key: vh-venv-v1-${{ runner.os }}-py312-${{ github.event.inputs.step == 'source' && 'src' || 'light' }}
       - name: Cai ffmpeg va thu vien
         env:
           STEP: ${{ github.event.inputs.step }}
           VARIANT: ${{ github.event.inputs.variant }}
         run: |
-          which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
-          if [ "$STEP" = "render" ]; then sudo apt-get install -y fonts-noto-core fonts-dejavu-core fontconfig || true; fi
-          pip install requests numpy
-          if [ "$STEP" = "render" ] && [ "$VARIANT" = "voice" ]; then pip install edge-tts || echo "::warning title=Giong doc::Không cài được edge-tts, bước giọng đọc sẽ báo lỗi"; fi
-          case "$STEP" in translate|render|publish|check) ;; *) pip install faster-whisper || echo "::warning title=Whisper::Không cài được faster-whisper, bước nhận giọng nói sẽ báo lỗi, hãy dùng file SRT/VTT";; esac
+          # Đã có thì dùng lại từ cache (GitHub cấp máy mới mỗi lần chạy nên cài lại từ đầu rất tốn thời gian). Cache hỏng hoặc thiếu thì tự cài như cũ.
+          SECONDS=0
+          FF="$HOME/ffmpeg-static"
+          ff_ok() { [ -x "$FF/ffmpeg" ] && [ -x "$FF/ffprobe" ] && "$FF/ffmpeg" -hide_banner -filters 2>/dev/null | grep -qw ass && "$FF/ffmpeg" -hide_banner -encoders 2>/dev/null | grep -q libx264 && "$FF/ffmpeg" -hide_banner -encoders 2>/dev/null | grep -q libmp3lame; }
+          FFSRC=cache
+          if ! ff_ok; then
+            FFSRC=tai-moi
+            rm -rf "$FF"; mkdir -p "$FF"
+            if curl -fsSL --retry 3 --max-time 240 -o "$RUNNER_TEMP/ff.tar.xz" "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-gpl-7.1.tar.xz" \
+               && tar -xJf "$RUNNER_TEMP/ff.tar.xz" -C "$FF" --wildcards '*/bin/ffmpeg' '*/bin/ffprobe' --strip-components=2; then :; else rm -rf "$FF"; fi
+          fi
+          if ff_ok; then
+            echo "$FF" >> "$GITHUB_PATH"
+          else
+            FFSRC=apt
+            rm -rf "$FF"
+            which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+          fi
+          if [ "$STEP" = "render" ] && ! fc-list 2>/dev/null | grep -qi "noto sans"; then sudo apt-get install -y fonts-noto-core fonts-dejavu-core fontconfig || true; fi
+          VENV="$HOME/vh-venv"; PYSRC=cache
+          "$VENV/bin/python" -c "import sys" 2>/dev/null || { rm -rf "$VENV"; python -m venv "$VENV"; PYSRC=tao-moi; }
+          export PATH="$VENV/bin:$PATH"
+          echo "$VENV/bin" >> "$GITHUB_PATH"
+          pip install -q requests numpy edge-tts || echo "::warning title=Thu vien::Không cài được một số thư viện cơ bản"
+          case "$STEP" in
+            source)
+              pip install -q faster-whisper || echo "::warning title=Whisper::Không cài được faster-whisper, bước nhận giọng nói sẽ báo lỗi, hãy dùng file SRT/VTT"
+              pip install -q pillow rapidocr-onnxruntime || echo "::warning title=OCR::Không cài được RapidOCR, sẽ dùng Tesseract (kém chính xác hơn với chữ Hán)" ;;
+          esac
+          echo "Cài đặt xong sau ${SECONDS}s (ffmpeg: ${FFSRC}, thư viện Python: ${PYSRC})"
+
       - name: Cai OCR (chi khi du an doc chu tren hinh)
         if: github.event.inputs.step == 'source'
         env:
