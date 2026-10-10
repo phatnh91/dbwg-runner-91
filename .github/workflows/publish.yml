@@ -101,9 +101,16 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          TARGET_REPO: phatnh91/dailybreadwithgod
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
           TAG="${{ steps.gate.outputs.tag }}"
-          # Cách chính: bản đã lưu ở nhánh previews (reel.mp4, meta.json, reel_yt.mp4...), không dùng dung lượng artifact
+          # Cách chính: kho R2 (daily/<lượt>/). Chưa có, lỗi, hoặc cũ hơn bản ở nhánh git thì lấy từ nhánh previews như cũ
+          if python tools/preview_store.py fetch "$TAG" "out/$TAG"; then exit 0; fi
+          # Dự phòng 1: bản đã lưu ở nhánh previews (reel.mp4, meta.json, reel_yt.mp4...), không dùng dung lượng artifact
           rm -rf /tmp/pvx
           if git clone -q --depth 1 -b previews "https://x-access-token:${GH_TOKEN}@github.com/phatnh91/dailybreadwithgod.git" /tmp/pvx 2>/dev/null \
              && [ -f "/tmp/pvx/$TAG/reel.mp4" ] && [ -f "/tmp/pvx/$TAG/meta.json" ]; then

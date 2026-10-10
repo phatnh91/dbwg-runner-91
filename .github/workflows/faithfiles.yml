@@ -194,6 +194,8 @@ jobs:
         id: p
         env:
           EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -203,7 +205,7 @@ jobs:
           git config user.email "daily-bread-bot@users.noreply.github.com"
           git add -A files/pending.json files/done.csv 2>/dev/null || true
           git diff --cached --quiet && exit 0
-          git commit -m "Hồ sơ: hủy tập theo yêu cầu"
+          git commit -m "Hồ sơ: gỡ tập khỏi hàng chờ (hủy hoặc mất dữ liệu)"
           for i in 1 2 3 4 5; do git pull --rebase && git push && exit 0; sleep $((i * 5)); done
 
   publish:
@@ -238,7 +240,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           NAME="files-src-${{ needs.plan.outputs.id }}"
-          for RUN_ID in $(gh run list --workflow faithfiles.yml --limit 20 --json databaseId -q '.[].databaseId'); do
+          for RUN_ID in $(gh run list --workflow faithfiles.yml --limit 60 --json databaseId -q '.[].databaseId'); do
             if gh run download "$RUN_ID" -n "$NAME" -D files/work/ 2>/dev/null; then
               echo "Đã lấy $NAME từ lần chạy $RUN_ID"; exit 0
             fi
