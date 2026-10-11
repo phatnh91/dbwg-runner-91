@@ -14,6 +14,10 @@ on:
         description: "Lượt: main (lượt chính) hoặc noon (lượt 12:00 của annhien). Để trống = tất cả"
         required: false
         default: ""
+      only:
+        description: "Đăng lại: chỉ các nền tảng này (facebook, instagram, youtube; cách nhau dấu phẩy). Để trống = tất cả như thường"
+        required: false
+        default: ""
       auto:
         description: "1 = chạy từ lịch hẹn giờ bên ngoài (cron-job.org): bỏ qua nếu hôm nay đã làm rồi"
         required: false
@@ -126,6 +130,7 @@ jobs:
         env:
           CHANNEL: ${{ matrix.channel }}
           SLOT: ${{ matrix.slot }}
+          ONLY_PLATFORMS: ${{ github.event.inputs.only }}
           FB_PAGE_ID: ${{ secrets[format('FB_PAGE_ID{0}', matrix.suffix)] }}
           FB_PAGE_TOKEN: ${{ secrets[format('FB_PAGE_TOKEN{0}', matrix.suffix)] }}
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
@@ -149,7 +154,7 @@ jobs:
         run: |
           git config user.name "daily-bread-bot"
           git config user.email "daily-bread-bot@users.noreply.github.com"
-          git add channels/${{ matrix.channel }}/posted.csv 2>/dev/null || exit 0
+          git add -A channels/${{ matrix.channel }}/posted.csv channels/${{ matrix.channel }}/post_errors.json 2>/dev/null || git add channels/${{ matrix.channel }}/posted.csv 2>/dev/null || exit 0
           git diff --cached --quiet && exit 0
           git commit -m "Đã đăng ${{ steps.gate.outputs.tag }}: $(date -u +%F)"
           for i in 1 2 3 4 5; do
