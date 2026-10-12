@@ -1,0 +1,95 @@
+name: 16 - Tra loi binh luan (kho public)
+
+# Đặt ở .github/workflows/replies.yml của kho public (sync_public.bat tự chép). Lấy mã từ kho private bằng PRIVATE_REPO_TOKEN, ghi trạng thái về kho private.
+# Log kho public ai cũng đọc được: bước chạy chỉ in dòng thống kê và lỗi, KHÔNG in nội dung bình luận hay câu trả lời.
+# Mỗi 2 giờ: đọc bình luận mới dưới bài đã đăng (Facebook, Instagram, YouTube) của cả 4 trang, AI soạn trả lời theo giọng từng trang.
+# Bình luận lành (cảm ơn, Amen, khen) thì tự trả lời; còn lại gửi Telegram để duyệt: /gui <mã> hoặc /bo <mã>.
+# Tắt cho một trang: channels/<kênh>/config.json -> "comment_replies": {"enabled": false}. Chạy thử không gửi gì: dry = 1.
+on:
+  schedule:
+    - cron: "17 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Chỉ chạy một trang (en, vi, annhien, luatchoi). Để trống = tất cả"
+        required: false
+        default: ""
+      dry:
+        description: "1 = chạy thử, không gửi trả lời nào"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: replies
+  cancel-in-progress: false
+
+jobs:
+  replies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests cryptography
+      - name: Trả lời bình luận (lần lượt từng trang)
+        env:
+          INPUT_CHANNEL: ${{ github.event.inputs.channel }}
+          INPUT_DRY: ${{ github.event.inputs.dry }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+          FB_PAGE_ID_VI: ${{ secrets.FB_PAGE_ID_VI }}
+          FB_PAGE_TOKEN_VI: ${{ secrets.FB_PAGE_TOKEN_VI }}
+          FB_PAGE_ID_AN: ${{ secrets.FB_PAGE_ID_AN }}
+          FB_PAGE_TOKEN_AN: ${{ secrets.FB_PAGE_TOKEN_AN }}
+          FB_PAGE_ID_LC: ${{ secrets.FB_PAGE_ID_LC }}
+          FB_PAGE_TOKEN_LC: ${{ secrets.FB_PAGE_TOKEN_LC }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          YT_REFRESH_TOKEN_VI: ${{ secrets.YT_REFRESH_TOKEN_VI }}
+          YT_REFRESH_TOKEN_AN: ${{ secrets.YT_REFRESH_TOKEN_AN }}
+          YT_REFRESH_TOKEN_LC: ${{ secrets.YT_REFRESH_TOKEN_LC }}
+        run: |
+          fail=0
+          for pair in en: vi:_VI annhien:_AN luatchoi:_LC; do
+            ch="${pair%%:*}"; sfx="${pair#*:}"
+            if [ -n "$INPUT_CHANNEL" ] && [ "$INPUT_CHANNEL" != "$ch" ]; then continue; fi
+            echo "::group::$ch"
+            pid="FB_PAGE_ID$sfx"; ptk="FB_PAGE_TOKEN$sfx"; ytk="YT_REFRESH_TOKEN$sfx"
+            args=""; [ "$INPUT_DRY" = "1" ] && args="--dry"
+            CHANNEL="$ch" FB_PAGE_ID="${!pid}" FB_PAGE_TOKEN="${!ptk}" YT_REFRESH_TOKEN="${!ytk}" python reply_comments.py $args > "$RUNNER_TEMP/r.log" 2>&1 || { echo "::warning title=Trả lời bình luận::$ch lỗi"; fail=1; }
+            # chỉ giữ dòng thống kê / lỗi, cắt ngắn
+            grep -E "Bình luận mới|Đã tự trả lời|đang tắt|lỗi|Lỗi|Traceback|Error" "$RUNNER_TEMP/r.log" | cut -c1-160 | head -12
+            echo "::endgroup::"
+          done
+          exit 0
+
+      - name: Lưu trạng thái (tránh trả lời hai lần)
+        run: |
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add channels/*/replies.json 2>/dev/null || true
+          git diff --cached --quiet && exit 0
+          git commit -m "Trạng thái trả lời bình luận: $(date -u +%F-%H%M)"
+          for i in 1 2 3 4 5; do
+            git pull --rebase && git push && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
