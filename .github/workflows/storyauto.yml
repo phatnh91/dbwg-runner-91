@@ -1,0 +1,174 @@
+name: 15 - Ke chuyen tu dong (3 tap/tuan, vi + en, kho public)
+
+# Dat o .github/workflows/storyauto.yml cua kho public (sync_public.bat tu chep).
+# Trang vi: Thu 2, 4, 6 luc ~12:00 gio VN. Trang en: ~06:47 gio VN (tuc toi hom truoc o My). Chon tap ke chuyen ke tiep (story_next.py), dung video, gui ban xem truoc qua Telegram,
+# cho 15 phut (nhan /skip de huy), roi dang Facebook + Instagram + YouTube. Moi ngay chi chay 1 tap; tap da thu khong tu chay lai.
+# Tat bang cach dat "auto": false trong series/<bo>/outline.json. Can cung secret nhu storypost.yml.
+on:
+  schedule:
+    - cron: "47 4 * * 1,3,5"   # vi ~11:47 VN
+    - cron: "20 6 * * 1,3,5"   # vi du phong ~13:20 VN (cung ngay da chay thi bo qua)
+    - cron: "47 23 * * 1,3,5"  # en ~06:47 VN hom sau (toi o My: ~7:47pm ET)
+    - cron: "20 1 * * 2,4,6"   # en du phong
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Trang: vi, en (de trong = ca hai)"
+        required: false
+        default: ""
+      series:
+        description: "Ten bo (thu muc trong series/)"
+        required: true
+        default: "tong-do"
+      wait_minutes:
+        description: "So phut cho /skip truoc khi dang (0 = dang ngay)"
+        required: true
+        default: "15"
+
+permissions:
+  contents: write
+
+jobs:
+  auto:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - channel: vi
+            suffix: "_VI"
+            cron: "47 4 * * 1,3,5|20 6 * * 1,3,5"
+          - channel: en
+            suffix: ""
+            cron: "47 23 * * 1,3,5|20 1 * * 2,4,6"
+    concurrency:
+      group: storyauto-${{ matrix.channel }}
+      cancel-in-progress: false
+    env:
+      CH: ${{ matrix.channel }}
+      SE: ${{ github.event.inputs.series || 'tong-do' }}
+      WAIT: ${{ github.event.inputs.wait_minutes || '15' }}
+    steps:
+      - name: Kiem tra dau vao va co chay trang nay khong
+        id: gate
+        env:
+          CH_IN: ${{ github.event.inputs.channel }}
+          EVENT: ${{ github.event_name }}
+          SCHED: ${{ github.event.schedule }}
+          CRONS: ${{ matrix.cron }}
+        run: |
+          [[ "$SE" =~ ^[a-z0-9-]{2,30}$ && "$WAIT" =~ ^[0-9]{1,3}$ && "$CH_IN" =~ ^(vi|en)?$ ]] || { echo "::error::Dau vao khong hop le"; exit 1; }
+          RUN=true
+          if [ "$EVENT" = "schedule" ] && [[ "|$CRONS|" != *"|$SCHED|"* ]]; then RUN=false; fi
+          if [ -n "$CH_IN" ] && [ "$CH_IN" != "$CH" ]; then RUN=false; fi
+          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Chon tap ke tiep
+        id: pick
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          EP="$(python story_next.py --channel "$CH" --series "$SE")"
+          echo "ep=$EP" >> "$GITHUB_OUTPUT"
+          if [ -z "$EP" ]; then echo "::notice title=Ke chuyen::Khong co tap nao can chay luc nay (da chay hom nay, da het tap, hoac tat auto)"; exit 0; fi
+          echo "Chon tap $EP"
+          python story_next.py --channel "$CH" --series "$SE" --mark "$EP"
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add channels/$CH/story_auto.json
+          git commit -m "Ke chuyen tu dong: thu tap $EP ($SE)" -q
+          for i in 1 2 3 4 5; do git pull --rebase -q && git push -q && break; sleep $((i * 5)); done
+      - name: Cai ffmpeg va thu vien
+        if: steps.pick.outputs.ep != ''
+        timeout-minutes: 10
+        run: |
+          which ffmpeg || (sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg)
+          pip install -r requirements.txt numpy
+      - name: Dung tap
+        if: steps.pick.outputs.ep != ''
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          CHANNEL: ${{ matrix.channel }}
+        run: python story_build.py --channel "$CH" --series "$SE" --episode "${{ steps.pick.outputs.ep }}"
+      - name: Luu video de dang tay neu can
+        if: steps.pick.outputs.ep != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: tap-${{ env.SE }}-${{ steps.pick.outputs.ep }}-${{ matrix.channel }}
+          path: |
+            out/${{ matrix.channel }}/reel.mp4
+            out/${{ matrix.channel }}/caption.txt
+          retention-days: 3
+      - name: Cho /skip
+        if: steps.pick.outputs.ep != '' && env.WAIT != '0'
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          python -c "from bot import notify; notify.send_message('⏳ Tập ${{ steps.pick.outputs.ep }} (kể chuyện) (${CH}) sẽ tự đăng sau ${WAIT} phút. Nhắn /skip ${CH} để hủy.')"
+          sleep $((WAIT * 60))
+      - name: Dang bai
+        if: steps.pick.outputs.ep != ''
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          ONLY_PLATFORMS: facebook,instagram,youtube
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          FB_PAGE_ID: ${{ secrets[format('FB_PAGE_ID{0}', matrix.suffix)] }}
+          FB_PAGE_TOKEN: ${{ secrets[format('FB_PAGE_TOKEN{0}', matrix.suffix)] }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets[format('YT_REFRESH_TOKEN{0}', matrix.suffix)] }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        # Log kho public ai cung doc duoc: loc bot, chi giu dong trang thai va loi
+        run: |
+          set +e
+          python publish.py > "$RUNNER_TEMP/pub.log" 2>&1
+          rc=$?
+          grep -E "✅|❌|⚠|Đã đăng|đã đăng|bỏ qua|Bỏ qua|lỗi|Lỗi|HTTP [0-9]{3}|Facebook|YouTube|Instagram" "$RUNNER_TEMP/pub.log" | cut -c1-200 | head -40
+          if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 8 dòng cuối:"; tail -n 8 "$RUNNER_TEMP/pub.log" | cut -c1-200; fi
+          exit $rc
+      - name: Ghi lai nen tang da dang (tranh dang trung)
+        if: always() && steps.pick.outputs.ep != ''
+        continue-on-error: true
+        run: |
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add -A channels/$CH/posted.csv channels/$CH/post_errors.json 2>/dev/null || git add channels/$CH/posted.csv 2>/dev/null || exit 0
+          git diff --cached --quiet && exit 0
+          git commit -m "Da dang ke chuyen $SE tap ${{ steps.pick.outputs.ep }} ($CH)"
+          for i in 1 2 3 4 5; do
+            git pull --rebase && git push && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
+      - name: Bao loi qua Telegram
+        if: failure() && steps.pick.outputs.ep != ''
+        continue-on-error: true
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          python -c "from bot import notify; notify.send_message('❌ Kể chuyện tự động: tập ${{ steps.pick.outputs.ep }} bị lỗi. Tập này sẽ không tự chạy lại; kiểm tra Actions rồi chạy tay workflow 14 nếu cần.')"
