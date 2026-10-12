@@ -52,9 +52,10 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Cai ffmpeg, font va thu vien
+        timeout-minutes: 10
         run: |
-          which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
-          sudo apt-get install -y fonts-noto-core fontconfig || true
+          # Font da nam trong assets/fonts; may ubuntu-latest co san ffmpeg (khong apt-get: tai font Noto rat lau)
+          which ffmpeg || (sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg)
           pip install -r requirements.txt numpy
       - name: Dung tap
         env:
