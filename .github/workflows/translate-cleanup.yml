@@ -1,0 +1,38 @@
+name: 12 - Don tai lieu dich het han (kho public)
+
+# Xoa moi file trong trans/ (tai lieu dich) cu hon 2 ngay tren R2. Chay moi 6 gio; app cung tu xoa khi mo trang Dich tai lieu.
+# Can secret PRIVATE_REPO_TOKEN va R2_*. Chay tay: Actions -> "Don tai lieu dich het han" -> Run workflow.
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cai thu vien
+        run: pip install requests
+      - name: Don
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set +e
+          python -m bot.doctrans --cleanup > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          grep -E "^(Dọn xong|::error title=Dịch tài liệu::)" "$RUNNER_TEMP/step.log" | cut -c1-300
+          exit $rc

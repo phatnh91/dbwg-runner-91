@@ -1,0 +1,71 @@
+name: 11 - Dich tai lieu (kho public)
+
+# Dich tai lieu / hop dong (DOCX, TXT) cho trang "Dich tai lieu" cua Hunter Studio.
+# Dat o .github/workflows/translate.yml cua kho public (tools/public_runner/sync_public.bat tu chep). Can secret PRIVATE_REPO_TOKEN,
+# R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET va khoa AI (AI_CONFIG_SECRET, GEMINI_API_KEY...), bien repo XOAI_AI_PROVIDERS.
+# App tao trans/<ma>/meta.json + tai file goc len R2; workflow chi nhan ma tai lieu (ngau nhien), doc yeu cau tu meta.json.
+# Log cua kho public ai cung doc duoc: chi cho phep in tien do va ten loi, KHONG in noi dung tai lieu hay loi tho cua nha cung cap AI.
+on:
+  workflow_dispatch:
+    inputs:
+      id:
+        description: "Ma tai lieu (tr-xxxxxxxx)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: translate-${{ github.event.inputs.id }}
+  cancel-in-progress: false
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Kiem tra ma tai lieu
+        env:
+          DOC_ID: ${{ github.event.inputs.id }}
+        run: |
+          [[ "$DOC_ID" =~ ^tr-[a-z0-9]{8,24}$ ]] || { echo "::error::Ma tai lieu khong hop le"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Cai thu vien
+        run: pip install -r requirements.txt python-docx
+      - name: Dich
+        env:
+          DOC_ID: ${{ github.event.inputs.id }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
+          AI_PROVIDERS: ${{ vars.XOAI_AI_PROVIDERS }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set +e
+          python -m bot.doctrans > "$RUNNER_TEMP/step.log" 2>&1
+          rc=$?
+          # Chi giu dong tien do va ten loi cua chinh bot.doctrans; bo moi dong khac (co the chua loi tho cua nha cung cap AI)
+          grep -E "^(Đã dịch [0-9]+/[0-9]+ lượt|Xong: [0-9]+/[0-9]+ đoạn|AI đang dùng: |Đang dùng AI dự phòng: |::error title=Dịch tài liệu::)" "$RUNNER_TEMP/step.log" | cut -c1-300 | head -60
+          exit $rc
+      - name: Danh dau loi neu lan chay hong
+        if: failure()
+        env:
+          DOC_ID: ${{ github.event.inputs.id }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: python -m bot.doctrans --fail > /dev/null 2>&1 || true
