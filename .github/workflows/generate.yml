@@ -14,6 +14,10 @@ on:
         description: "Lượt: main (lượt chính) hoặc noon (lượt 12:00 của annhien). Để trống = tất cả"
         required: false
         default: ""
+      reuse:
+        description: "1 = dùng lại kịch bản đã lưu của lần tạo gần nhất, chỉ làm lại giọng đọc và video (không viết nội dung mới)"
+        required: false
+        default: ""
       auto:
         description: "1 = chạy từ lịch hẹn giờ bên ngoài (cron-job.org): bỏ qua nếu hôm nay đã làm rồi"
         required: false
@@ -113,6 +117,7 @@ jobs:
         env:
           CHANNEL: ${{ matrix.channel }}
           SLOT: ${{ matrix.slot }}
+          REUSE_SCRIPT: ${{ github.event.inputs.reuse }}
           SKIP_IF_DONE: ${{ (github.event_name == 'schedule' || github.event.inputs.auto == '1') && '1' || '' }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
