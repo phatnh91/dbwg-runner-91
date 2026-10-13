@@ -1,7 +1,7 @@
 name: 15 - Ke chuyen tu dong (3 tap/tuan, vi + en, kho public)
 
 # Dat o .github/workflows/storyauto.yml cua kho public (sync_public.bat tu chep).
-# Trang vi: Thu 2, 4, 6 luc ~12:00 gio VN. Trang en: ~06:47 gio VN (tuc toi hom truoc o My). Chon tap ke chuyen ke tiep (story_next.py), dung video, gui ban xem truoc qua Telegram,
+# Trang vi: Thu 2, 4, 6 luc ~12:00 gio VN. Trang en: Thu 2, 4, 6 luc ~21:00 gio VN (tuc ~10:00 sang o New York, 7:00 sang o California). Chon tap ke chuyen ke tiep (story_next.py), dung video, gui ban xem truoc qua Telegram,
 # cho 15 phut (nhan /skip de huy), roi dang Facebook + Instagram + YouTube. Moi ngay chi chay 1 tap; tap da thu khong tu chay lai.
 # Tat bang cach dat "auto": false trong series/<bo>/outline.json. Can cung secret nhu storypost.yml.
 # Bo: mac dinh "auto" = story_next.py tu chon bo dang chay (theo "order" trong outline.json; bo sau chi bat dau khi bo truoc het tap).
@@ -10,8 +10,8 @@ on:
   schedule:
     - cron: "47 4 * * 1,3,5"   # vi ~11:47 VN
     - cron: "20 6 * * 1,3,5"   # vi du phong ~13:20 VN (cung ngay da chay thi bo qua)
-    - cron: "47 23 * * 1,3,5"  # en ~06:47 VN hom sau (toi o My: ~7:47pm ET)
-    - cron: "20 1 * * 2,4,6"   # en du phong
+    - cron: "47 13 * * 1,3,5"  # en ~21:00 VN (sang o My: ~10:00 ET)
+    - cron: "20 15 * * 1,3,5"  # en du phong ~22:20 VN
   workflow_dispatch:
     inputs:
       channel:
@@ -43,7 +43,7 @@ jobs:
             cron: "47 4 * * 1,3,5|20 6 * * 1,3,5"
           - channel: en
             suffix: ""
-            cron: "47 23 * * 1,3,5|20 1 * * 2,4,6"
+            cron: "47 13 * * 1,3,5|20 15 * * 1,3,5"
     concurrency:
       group: storyauto-${{ matrix.channel }}
       cancel-in-progress: false
