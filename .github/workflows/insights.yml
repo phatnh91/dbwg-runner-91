@@ -67,6 +67,9 @@ jobs:
           SECRET_SUFFIX: ${{ matrix.suffix }}
           FB_PAGE_ID: ${{ secrets[format('FB_PAGE_ID{0}', matrix.suffix)] }}
           FB_PAGE_TOKEN: ${{ secrets[format('FB_PAGE_TOKEN{0}', matrix.suffix)] }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets[format('YT_REFRESH_TOKEN{0}', matrix.suffix)] }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
@@ -82,7 +85,7 @@ jobs:
         run: |
           git config user.name "daily-bread-bot"
           git config user.email "daily-bread-bot@users.noreply.github.com"
-          for f in stats.csv followers.csv; do if [ -f "channels/${{ matrix.channel }}/$f" ]; then git add "channels/${{ matrix.channel }}/$f"; fi; done
+          for f in stats.csv followers.csv yt_stats.csv; do if [ -f "channels/${{ matrix.channel }}/$f" ]; then git add "channels/${{ matrix.channel }}/$f"; fi; done
           git diff --cached --quiet && exit 0
           git commit -m "Số liệu ${{ matrix.channel }}: $(date -u +%F)"
           for i in 1 2 3 4 5; do
