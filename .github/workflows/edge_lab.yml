@@ -31,7 +31,7 @@ jobs:
           python-version: "3.11"
 
       - name: Cài edge-tts
-        run: pip install edge-tts requests
+        run: pip install -U edge-tts requests
 
       - name: Đọc thử và gửi Telegram
         env:

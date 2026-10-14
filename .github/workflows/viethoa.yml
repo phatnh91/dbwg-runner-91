@@ -100,7 +100,9 @@ jobs:
           "$VENV/bin/python" -c "import sys" 2>/dev/null || { rm -rf "$VENV"; python -m venv "$VENV"; PYSRC=tao-moi; }
           export PATH="$VENV/bin:$PATH"
           echo "$VENV/bin" >> "$GITHUB_PATH"
-          pip install -q requests numpy edge-tts || echo "::warning title=Thu vien::Không cài được một số thư viện cơ bản"
+          pip install -q requests numpy || echo "::warning title=Thu vien::Không cài được một số thư viện cơ bản"
+          # edge-tts PHẢI luôn mới nhất: Microsoft đổi cách xác thực làm bản cũ bị từ chối (WSServerHandshakeError 403), mà thư mục venv được lưu cache nên "pip install" thường không tự nâng bản
+          pip install -q -U edge-tts || echo "::warning title=edge-tts::Không nâng được edge-tts, giọng đọc có thể lỗi"
           case "$STEP" in
             source)
               pip install -q faster-whisper || echo "::warning title=Whisper::Không cài được faster-whisper, bước nhận giọng nói sẽ báo lỗi, hãy dùng file SRT/VTT"
