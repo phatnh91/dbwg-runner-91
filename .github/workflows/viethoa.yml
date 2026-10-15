@@ -100,7 +100,7 @@ jobs:
           "$VENV/bin/python" -c "import sys" 2>/dev/null || { rm -rf "$VENV"; python -m venv "$VENV"; PYSRC=tao-moi; }
           export PATH="$VENV/bin:$PATH"
           echo "$VENV/bin" >> "$GITHUB_PATH"
-          pip install -q requests numpy || echo "::warning title=Thu vien::Không cài được một số thư viện cơ bản"
+          pip install -q requests numpy pillow || echo "::warning title=Thu vien::Không cài được một số thư viện cơ bản"
           # edge-tts PHẢI luôn mới nhất: Microsoft đổi cách xác thực làm bản cũ bị từ chối (WSServerHandshakeError 403), mà thư mục venv được lưu cache nên "pip install" thường không tự nâng bản
           pip install -q -U edge-tts || echo "::warning title=edge-tts::Không nâng được edge-tts, giọng đọc có thể lỗi"
           case "$STEP" in
@@ -117,7 +117,7 @@ jobs:
         run: |
           INFO=$(python3 -c "import json,os;p=json.load(open('viethoa/%s/project.json' % os.environ['PROJECT']));print(p.get('mode',''),p.get('language','zh'))" 2>/dev/null || echo "")
           set -- $INFO
-          if [ "$1" = "ocr" ]; then
+          if [ "$1" = "ocr" ] || [ "$1" = "both" ]; then
             case "$2" in zh) PK=chi-sim;; en) PK=;; ja) PK=jpn;; ko) PK=kor;; th) PK=tha;; id) PK=ind;; fr) PK=fra;; de) PK=deu;; es) PK=spa;; pt) PK=por;; it) PK=ita;; ru) PK=rus;; hi) PK=hin;; ar) PK=ara;; *) PK=;; esac
             sudo apt-get update -qq || true
             sudo apt-get install -y -qq tesseract-ocr ${PK:+tesseract-ocr-$PK} libgl1 || echo "::warning title=OCR::Không cài được Tesseract"
