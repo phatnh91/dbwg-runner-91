@@ -1,0 +1,84 @@
+name: 20 - Affiliate - Tao video Do Gia Dung (kho public)
+
+# Tao video quang cao 9:16 tu link san pham (Shopee, Lazada, TikTok Shop, web): cao du lieu, AI viet kich ban, giong doc, dung video,
+# luu len R2 (affiliate/<ma>/) va gui ban xem truoc qua Telegram cua shop. Bam Duyet tren Telegram hoac tren web app de dang Facebook Reels.
+# Dat o .github/workflows/affiliate.yml cua kho public (tools/public_runner/sync_public.bat tu chep). Can secret PRIVATE_REPO_TOKEN,
+# GEMINI_API_KEY, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, SHOP_TELEGRAM_BOT_TOKEN, SHOP_TELEGRAM_CHAT_ID
+# (hai secret Telegram luu tu web app: Tiep thi lien ket -> Ket noi). Log cua kho public ai cung doc duoc: khong in noi dung nhay cam.
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Link san pham (Shopee, Lazada, TikTok Shop, web)"
+        required: true
+      chat_id:
+        description: "Telegram Chat ID nhan ban xem truoc (de trong = lay theo secret)"
+        required: false
+        default: ""
+      job_id:
+        description: "Ma luot chay (de trong = tu sinh)"
+        required: false
+        default: ""
+      voice:
+        description: "Giong doc: female (nu) hoac male (nam)"
+        required: false
+        default: "female"
+      angle:
+        description: "Huong kich ban: pas | review | beforeafter"
+        required: false
+        default: "pas"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: affiliate-${{ github.event.inputs.job_id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  make_video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Kiem tra dau vao
+        env:
+          IN_URL: ${{ github.event.inputs.url }}
+          IN_CHAT: ${{ github.event.inputs.chat_id }}
+          IN_JOB: ${{ github.event.inputs.job_id }}
+          IN_VOICE: ${{ github.event.inputs.voice }}
+          IN_ANGLE: ${{ github.event.inputs.angle }}
+        run: |
+          # Dau vao di qua bien moi truong (khong noi thang vao lenh), va phai dung dang truoc khi chay bat cu thu gi
+          [[ "$IN_URL" =~ ^https?://[A-Za-z0-9._~:/?#@!*,=%+-]{4,1500}$ ]] || { echo "::error::Link san pham khong hop le"; exit 1; }
+          [[ "$IN_CHAT" =~ ^(-?[0-9]{3,20})?$ ]] || { echo "::error::Chat ID khong hop le"; exit 1; }
+          [[ "$IN_JOB" =~ ^(aff-[0-9]{6,20})?$ ]] || { echo "::error::Ma luot chay khong hop le"; exit 1; }
+          [[ "$IN_VOICE" =~ ^(female|male)$ ]] || { echo "::error::Giong doc khong hop le"; exit 1; }
+          [[ "$IN_ANGLE" =~ ^(pas|review|beforeafter)$ ]] || { echo "::error::Huong kich ban khong hop le"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cai ffmpeg va thu vien
+        timeout-minutes: 10
+        run: |
+          which ffmpeg || (sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg)
+          pip install -q requests Pillow
+          pip install -q -U edge-tts
+      - name: Chay quy trinh Affiliate
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SHOP_TELEGRAM_BOT_TOKEN: ${{ secrets.SHOP_TELEGRAM_BOT_TOKEN || secrets.TELEGRAM_BOT_TOKEN }}
+          SHOP_TELEGRAM_CHAT_ID: ${{ secrets.SHOP_TELEGRAM_CHAT_ID || secrets.TELEGRAM_CHAT_ID }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          IN_URL: ${{ github.event.inputs.url }}
+          IN_CHAT: ${{ github.event.inputs.chat_id }}
+          IN_JOB: ${{ github.event.inputs.job_id }}
+          IN_VOICE: ${{ github.event.inputs.voice }}
+          IN_ANGLE: ${{ github.event.inputs.angle }}
+        run: python -m tools.affiliate.pipeline --url "$IN_URL" --chat-id "$IN_CHAT" --job-id "$IN_JOB" --voice "$IN_VOICE" --angle "$IN_ANGLE"
