@@ -27,6 +27,10 @@ on:
         description: "Huong kich ban: pas | review | beforeafter"
         required: false
         default: "pas"
+      manual:
+        description: "Nhap tay (JSON: title, price, images) khi trang ban hang chan may chu"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -47,6 +51,7 @@ jobs:
           IN_JOB: ${{ github.event.inputs.job_id }}
           IN_VOICE: ${{ github.event.inputs.voice }}
           IN_ANGLE: ${{ github.event.inputs.angle }}
+          IN_MANUAL: ${{ github.event.inputs.manual }}
         run: |
           # Dau vao di qua bien moi truong (khong noi thang vao lenh), va phai dung dang truoc khi chay bat cu thu gi
           [[ "$IN_URL" =~ ^https?://[A-Za-z0-9._~:/?#@!*,=%+-]{4,1500}$ ]] || { echo "::error::Link san pham khong hop le"; exit 1; }
@@ -54,6 +59,7 @@ jobs:
           [[ "$IN_JOB" =~ ^(aff-[0-9]{6,20})?$ ]] || { echo "::error::Ma luot chay khong hop le"; exit 1; }
           [[ "$IN_VOICE" =~ ^(female|male)$ ]] || { echo "::error::Giong doc khong hop le"; exit 1; }
           [[ "$IN_ANGLE" =~ ^(pas|review|beforeafter)$ ]] || { echo "::error::Huong kich ban khong hop le"; exit 1; }
+          [[ ${#IN_MANUAL} -le 6000 ]] || { echo "::error::Du lieu nhap tay qua dai"; exit 1; }
       - uses: actions/checkout@v4
         with:
           repository: phatnh91/dailybreadwithgod
@@ -81,4 +87,5 @@ jobs:
           IN_JOB: ${{ github.event.inputs.job_id }}
           IN_VOICE: ${{ github.event.inputs.voice }}
           IN_ANGLE: ${{ github.event.inputs.angle }}
-        run: python -m tools.affiliate.pipeline --url "$IN_URL" --chat-id "$IN_CHAT" --job-id "$IN_JOB" --voice "$IN_VOICE" --angle "$IN_ANGLE"
+          IN_MANUAL: ${{ github.event.inputs.manual }}
+        run: python -m tools.affiliate.pipeline --url "$IN_URL" --chat-id "$IN_CHAT" --job-id "$IN_JOB" --voice "$IN_VOICE" --angle "$IN_ANGLE" --manual "$IN_MANUAL"
