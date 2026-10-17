@@ -1,0 +1,54 @@
+name: 19 - Dang lai 4 tap dau Tong Do len YouTube Shorts (kho public)
+
+# Tai artifact "tongdo-fix-results" (tu workflow 18, da rut ngan + tang toc) va dang len YouTube
+# kenh en dang Shorts, dung tool/tongdo_reupload.py (tinh lai tieu de/mo ta tu outline.json, khong
+# qua publish.py nen khong bi chan boi post_key da danh dau "da dang" tu lan tai len cu).
+# Video cu tren YouTube (dang bi day qua YouTube Video thay vi Shorts) KHONG tu xoa - anh tu xoa tay.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "ID lan chay cua workflow 18 (de lay artifact tongdo-fix-results)"
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Cai thu vien
+        run: pip install -r requirements.txt
+
+      - name: Tai artifact 4 tap da fix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p tongdo_fixed
+          gh run download "${{ github.event.inputs.run_id }}" -R phatnh91/dbwg-runner-91 -n tongdo-fix-results -D tongdo_fixed
+          ls -la tongdo_fixed
+
+      - name: Dang 4 tap len YouTube Shorts
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: |
+          set -e
+          for ep in 1 2 3 4; do
+            echo "=== Tap $ep ==="
+            python tools/tongdo_reupload.py --episode "$ep" --video "tongdo_fixed/ep${ep}_fixed.mp4"
+          done
