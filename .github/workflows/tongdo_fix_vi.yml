@@ -1,0 +1,115 @@
+name: 20 - Dung va dang Tong Do vi Tap 1,2,4,5 len YouTube Shorts (kho public)
+
+# Trang vi: tap 1 (243s) va tap 2 (240s) da dang nhung qua 3 phut nen bi day qua YouTube Video
+# thay vi Shorts (giong truong hop kenh en, workflow 18/19). Tap 4 va 5 chua tung dang cho trang
+# vi (kich ban da co san trong series/tong-do/scripts, chi chua dung/dang). story_build.py da duoc
+# sua de tu tang toc (toi da outline.speedup_max, hien 1.5x) khi dung xong van qua 160s, nen chi can
+# dung lai binh thuong. Dung tung tap (--no-publish, van gui ban xem truoc qua Telegram nhu binh
+# thuong) roi dang rieng len YouTube bang tools/tongdo_reupload.py (khong qua publish.py nen khong
+# bi chan boi post_key "da dang" cu cua tap 1/2). KHONG tu dang Facebook/Instagram cho tap 4, 5 -
+# tap do la noi dung moi chua dang o 2 nen tang kia, de rieng cho lan dang binh thuong sau.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fix_tongdo_vi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      CHANNEL: vi
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Cai ffmpeg va thu vien
+        timeout-minutes: 10
+        run: |
+          which ffmpeg || (sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg)
+          pip install -r requirements.txt numpy requests
+
+      - name: Chuan bi thu muc ket qua
+        run: mkdir -p tongdo_vi_fixed
+
+      - name: Tap 1
+        run: |
+          python story_build.py --channel vi --series tong-do --episode 1 --no-publish
+          cp out/vi/reel.mp4 tongdo_vi_fixed/ep1_fixed.mp4
+
+      - name: Tap 2
+        run: |
+          python story_build.py --channel vi --series tong-do --episode 2 --no-publish
+          cp out/vi/reel.mp4 tongdo_vi_fixed/ep2_fixed.mp4
+
+      - name: Tap 4 (chua tung dung cho trang vi)
+        run: |
+          python story_build.py --channel vi --series tong-do --episode 4 --no-publish
+          cp out/vi/reel.mp4 tongdo_vi_fixed/ep4_fixed.mp4
+
+      - name: Tap 5 (chua tung dung cho trang vi)
+        run: |
+          python story_build.py --channel vi --series tong-do --episode 5 --no-publish
+          cp out/vi/reel.mp4 tongdo_vi_fixed/ep5_fixed.mp4
+
+      - name: Bang tong hop thoi luong (ffprobe)
+        run: |
+          echo "=========================================================="
+          python -c "
+          from pathlib import Path
+          from tools.video_speedup import get_duration
+
+          for ep in [1, 2, 4, 5]:
+              f = Path(f'tongdo_vi_fixed/ep{ep}_fixed.mp4')
+              if f.exists():
+                  dur = get_duration(f)
+                  status = 'DAT (Shorts <= 165s)' if dur <= 165.0 else 'CAN XEM XET (> 165s)'
+                  print(f'Tap {ep} ({f.name}): {dur:.2f}s ({int(dur//60)}:{int(dur%60):02d}) -> {status}')
+              else:
+                  print(f'Tap {ep} ({f.name}): KHONG TIM THAY FILE!')
+          "
+          echo "=========================================================="
+
+      - name: Luu artifact 4 tap (14 ngay)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tongdo-vi-fix-results
+          path: tongdo_vi_fixed/
+          retention-days: 14
+
+      - name: Ghi nhan da thu tap 4, 5 (tranh storyauto tu dung lai + dang trung FB/IG)
+        run: |
+          python story_next.py --channel vi --series tong-do --mark 4
+          python story_next.py --channel vi --series tong-do --mark 5
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add channels/vi/story_auto.json
+          git commit -m "Ke chuyen tu dong: thu tap 4, 5 (tong-do, dang tay qua YouTube Shorts)" -q
+          for i in 1 2 3 4 5; do git pull --rebase -q && git push -q && break; sleep $((i * 5)); done
+
+      - name: Dang len YouTube Shorts (chi YouTube, chua dang Facebook/Instagram cho tap 4,5)
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN_VI }}
+        run: |
+          set -e
+          for ep in 1 2 4 5; do
+            echo "=== Tap $ep ==="
+            python tools/tongdo_reupload.py --channel vi --episode "$ep" --video "tongdo_vi_fixed/ep${ep}_fixed.mp4"
+          done
