@@ -1,0 +1,123 @@
+name: 18 - Sua do dai Tong Do Shorts (Tap 1-4) (kho public)
+
+# Workflow sửa độ dài 4 tập đầu series "Mười hai tông đồ" (kênh EN) để vào YouTube Shorts (< 3 phút / < 165s).
+# Chạy thủ công qua workflow_dispatch, tải video gốc/dựng lại, tăng tốc và lưu artifact "tongdo-fix-results"
+# chứa 4 file: ep1_fixed.mp4, ep2_fixed.mp4, ep3_fixed.mp4, ep4_fixed.mp4.
+# KHÔNG tự động đăng lên YouTube trong workflow này.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fix_tongdo_shorts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Cai ffmpeg, font va thu vien
+        timeout-minutes: 10
+        run: |
+          which ffmpeg || (sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg)
+          pip install -r requirements.txt numpy requests
+
+      - name: Chuan bi thu muc ket qua
+        run: mkdir -p tongdo_fixed
+
+      - name: Tap 1 - Dung lai va tang toc x1.23
+        env:
+          CHANNEL: en
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          echo "=========================================================="
+          echo "=== TAP 1: Dung lai tu script va tang toc x1.23 ==="
+          echo "=========================================================="
+          python series_build.py --channel en --series tong-do --episode 1 --no-preview --no-publish
+          python tools/video_speedup.py out/en/reel.mp4 tongdo_fixed/ep1_fixed.mp4 1.23
+
+      - name: Tap 2 - Dung lai voi script da sua va tang toc (muc tieu <165s, toi da x1.3)
+        env:
+          CHANNEL: en
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          echo "=========================================================="
+          echo "=== TAP 2: Dung lai voi script da cat bot noi dung ==="
+          echo "=========================================================="
+          python series_build.py --channel en --series tong-do --episode 2 --no-preview --no-publish
+          python -c "
+          from tools.video_speedup import get_duration, speed_up
+
+          dur = get_duration('out/en/reel.mp4')
+          target = 164.0
+          needed = dur / target
+          factor = min(1.3, max(1.0, needed))
+          print(f'Tap 2 - Thoi luong sau khi dung: {dur:.2f}s, he so can tang toc: x{factor:.4f}')
+          speed_up('out/en/reel.mp4', 'tongdo_fixed/ep2_fixed.mp4', round(factor, 4))
+          final_dur = get_duration('tongdo_fixed/ep2_fixed.mp4')
+          print(f'Tap 2 - Thoi luong cuoi cung: {final_dur:.2f}s (he so x{factor:.4f})')
+          if final_dur > 165.0:
+              print(f'::warning title=Tap 2 chua dat muc tieu::Thoi luong cuoi cung {final_dur:.1f}s van vuot 165s voi he so toi da x{factor:.2f}. Claude can xem xet!')
+          "
+
+      - name: Tap 3 va Tap 4 - Lay ban goc tu backup va tang toc x1.14
+        run: |
+          echo "=========================================================="
+          echo "=== TAP 3 & 4: Lay ban goc tu nhanh tongdo-fix-backup ==="
+          echo "=========================================================="
+          git fetch origin tongdo-fix-backup
+          git show FETCH_HEAD:ep3_original.mp4 > ep3_original.mp4
+          git show FETCH_HEAD:ep4_original.mp4 > ep4_original.mp4
+
+          echo "--- Tang toc Tap 3 (factor 1.14) ---"
+          python tools/video_speedup.py ep3_original.mp4 tongdo_fixed/ep3_fixed.mp4 1.14
+
+          echo "--- Tang toc Tap 4 (factor 1.14) ---"
+          python tools/video_speedup.py ep4_original.mp4 tongdo_fixed/ep4_fixed.mp4 1.14
+
+      - name: In bang tong hop thoi luong cuoi cung (ffprobe)
+        run: |
+          echo "=========================================================="
+          echo "=== BANG TONG HOP THOI LUONG CUOI CUNG CUA CA 4 TAP ==="
+          echo "=========================================================="
+          python -c "
+          from pathlib import Path
+          from tools.video_speedup import get_duration
+
+          for ep in [1, 2, 3, 4]:
+              f = Path(f'tongdo_fixed/ep{ep}_fixed.mp4')
+              if f.exists():
+                  dur = get_duration(f)
+                  status = 'DAT (Shorts <= 165s)' if dur <= 165.0 else 'CAN XEM XET (> 165s)'
+                  print(f'Tap {ep} ({f.name}): {dur:.2f}s ({int(dur//60)}:{int(dur%60):02d}) -> {status}')
+              else:
+                  print(f'Tap {ep} ({f.name}): KHONG TIM THAY FILE!')
+          "
+          echo "=========================================================="
+
+      - name: Luu artifact 4 tap da fix (14 ngay)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tongdo-fix-results
+          path: tongdo_fixed/
+          retention-days: 14
