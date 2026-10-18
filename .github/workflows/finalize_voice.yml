@@ -1,0 +1,42 @@
+name: 27 - Chot giong moi cho luatchoi (kho public)
+
+# Anh Hunter da chon hunter-trial-2 sau khi nghe 2 ban thu. Doi raw.mp3 cua ban thang
+# thanh ref.wav (giong buoc trong try_voice_candidates.yml) roi dat lam ref.wav chinh
+# thuc cua assets/voices/hunter-low-tone (giu nguyen ref.txt + voice.json san co), xoa
+# 2 thu muc giong thu (hunter-trial-1, hunter-trial-2) vi khong con can nua, roi commit
+# thang vao main cua kho private.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+
+      - name: Cai ffmpeg
+        run: which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+
+      - name: Doi raw.mp3 (hunter-trial-2) thanh ref.wav chinh thuc
+        run: |
+          set -e
+          ffmpeg -y -loglevel error -i assets/voices/hunter-trial-2/raw.mp3 -c:a pcm_s16le assets/voices/hunter-low-tone/ref.wav
+          rm -rf assets/voices/hunter-trial-1 assets/voices/hunter-trial-2
+          ls -la assets/voices/hunter-low-tone
+
+      - name: Commit va day vao main
+        run: |
+          set -e
+          git config user.name "dbwg-bot"
+          git config user.email "dbwg-bot@users.noreply.github.com"
+          git add -A assets/voices/hunter-low-tone assets/voices/hunter-trial-1 assets/voices/hunter-trial-2
+          git commit -m "voice: chot hunter-trial-2 lam ref.wav moi cho hunter-low-tone (luatchoi), xoa 2 ban thu"
+          git pull --rebase origin main
+          git push origin HEAD:main
