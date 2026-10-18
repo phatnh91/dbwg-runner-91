@@ -1,0 +1,49 @@
+name: 22 - Kiem tra anh bia Tong Do da luu chua (kho public)
+
+# Chi doc, khong doi gi tren YouTube. Goi videos.list de xem YouTube co thuc su luu anh bia
+# tuy chinh chua, phan biet loi that voi viec Studio hien thi cham (dang xu ly thumbnail).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Cai thu vien
+        run: pip install -r requirements.txt
+
+      - name: Kenh en
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: |
+          python tools/tongdo_check_thumbnail.py --channel en --video-id bvwj-Nqyo_E
+          python tools/tongdo_check_thumbnail.py --channel en --video-id kt0iS2wAi_o
+          python tools/tongdo_check_thumbnail.py --channel en --video-id lxrc2mxzQuQ
+          python tools/tongdo_check_thumbnail.py --channel en --video-id jeA0UIBTvxo
+
+      - name: Kenh vi
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN_VI }}
+        run: |
+          python tools/tongdo_check_thumbnail.py --channel vi --video-id 1HUpMdeBlZc
+          python tools/tongdo_check_thumbnail.py --channel vi --video-id yKCAMAdrzY4
+          python tools/tongdo_check_thumbnail.py --channel vi --video-id u2JY_JwAn4I
+          python tools/tongdo_check_thumbnail.py --channel vi --video-id XDbDOg9gUQo
