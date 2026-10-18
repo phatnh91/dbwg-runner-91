@@ -1,0 +1,30 @@
+name: 25 - Kiem tra chu ky goi vieneu (kho public)
+
+# Chi doc - in ra chu ky ham that cua goi vieneu dang cai, de biet chinh xac tham so emotion/style
+# nao dung duoc truoc khi sua giong doc luatchoi.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Cai vieneu
+        run: pip install -r requirements-tts.txt
+
+      - name: In chu ky
+        run: python tools/inspect_vieneu.py
