@@ -50,22 +50,22 @@ jobs:
       - name: Tap 1
         run: |
           python story_build.py --channel vi --series tong-do --episode 1 --no-publish
-          cp out/vi/reel.mp4 tongdo_vi_fixed/ep1_fixed.mp4
+          cp "$([ -f out/vi/reel_yt.mp4 ] && echo out/vi/reel_yt.mp4 || echo out/vi/reel.mp4)" tongdo_vi_fixed/ep1_fixed.mp4
 
       - name: Tap 2
         run: |
           python story_build.py --channel vi --series tong-do --episode 2 --no-publish
-          cp out/vi/reel.mp4 tongdo_vi_fixed/ep2_fixed.mp4
+          cp "$([ -f out/vi/reel_yt.mp4 ] && echo out/vi/reel_yt.mp4 || echo out/vi/reel.mp4)" tongdo_vi_fixed/ep2_fixed.mp4
 
       - name: Tap 4 (chua tung dung cho trang vi)
         run: |
           python story_build.py --channel vi --series tong-do --episode 4 --no-publish
-          cp out/vi/reel.mp4 tongdo_vi_fixed/ep4_fixed.mp4
+          cp "$([ -f out/vi/reel_yt.mp4 ] && echo out/vi/reel_yt.mp4 || echo out/vi/reel.mp4)" tongdo_vi_fixed/ep4_fixed.mp4
 
       - name: Tap 5 (chua tung dung cho trang vi)
         run: |
           python story_build.py --channel vi --series tong-do --episode 5 --no-publish
-          cp out/vi/reel.mp4 tongdo_vi_fixed/ep5_fixed.mp4
+          cp "$([ -f out/vi/reel_yt.mp4 ] && echo out/vi/reel_yt.mp4 || echo out/vi/reel.mp4)" tongdo_vi_fixed/ep5_fixed.mp4
 
       - name: Bang tong hop thoi luong (ffprobe)
         run: |
