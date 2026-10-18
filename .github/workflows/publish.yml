@@ -98,7 +98,7 @@ jobs:
       - name: Cài thư viện
         if: steps.gate.outputs.run == 'true'
         run: |
-          pip install requests
+          pip install requests Pillow
           which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)  # mã hóa lại khi Instagram từ chối video
 
       - name: Lấy video đã tạo hôm nay
