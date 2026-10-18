@@ -1,0 +1,51 @@
+name: 21 - Gan anh bia cho 8 tap dau Tong Do (kho public)
+
+# Gan anh bia rieng (nen + ten tap) cho 4 tap kenh en va 4 tap kenh vi da dang TRUOC KHI
+# story_build.py co thumb_text. Chi gan anh bia, KHONG dang lai video, KHONG doi Cong khai.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  set_thumbnails:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Cai thu vien
+        run: pip install -r requirements.txt
+
+      - name: Kenh en - gan anh bia 4 tap
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: |
+          set -e
+          python tools/tongdo_set_thumbnail.py --channel en --episode 1 --video-id bvwj-Nqyo_E
+          python tools/tongdo_set_thumbnail.py --channel en --episode 2 --video-id kt0iS2wAi_o
+          python tools/tongdo_set_thumbnail.py --channel en --episode 3 --video-id lxrc2mxzQuQ
+          python tools/tongdo_set_thumbnail.py --channel en --episode 4 --video-id jeA0UIBTvxo
+
+      - name: Kenh vi - gan anh bia 4 tap
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN_VI }}
+        run: |
+          set -e
+          python tools/tongdo_set_thumbnail.py --channel vi --episode 1 --video-id 1HUpMdeBlZc
+          python tools/tongdo_set_thumbnail.py --channel vi --episode 2 --video-id yKCAMAdrzY4
+          python tools/tongdo_set_thumbnail.py --channel vi --episode 4 --video-id u2JY_JwAn4I
+          python tools/tongdo_set_thumbnail.py --channel vi --episode 5 --video-id XDbDOg9gUQo
