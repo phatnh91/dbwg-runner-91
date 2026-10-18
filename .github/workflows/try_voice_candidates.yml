@@ -1,0 +1,78 @@
+name: 26 - Thu 2 ban giong moi cho luatchoi (kho public)
+
+# Doi raw.mp3 -> ref.wav cho 2 thu muc giong thu (assets/voices/hunter-trial-1, hunter-trial-2),
+# doc thu cung mot cau bang bot/voice.py (engine "custom" that su dung trong video), luu ban nghe
+# thu vao nhanh "previews" (giong het co che Giong doc trong Loi Chua Studio) de anh Hunter nghe so sanh.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  try_voices:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cai ffmpeg
+        run: which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+
+      - name: Nho model giua cac lan chay
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: vieneu-v3-turbo-hf
+
+      - name: Cai giong rieng (VieNeu-TTS)
+        run: pip install -r requirements.txt -r requirements-tts.txt
+
+      - name: Doi raw.mp3 sang ref.wav cho ca 2 ban thu
+        run: |
+          ffmpeg -y -loglevel error -i assets/voices/hunter-trial-1/raw.mp3 -c:a pcm_s16le assets/voices/hunter-trial-1/ref.wav
+          ffmpeg -y -loglevel error -i assets/voices/hunter-trial-2/raw.mp3 -c:a pcm_s16le assets/voices/hunter-trial-2/ref.wav
+          ls -la assets/voices/hunter-trial-1 assets/voices/hunter-trial-2
+
+      - name: Doc thu ban 1
+        env:
+          CHANNEL: vi
+          VOICE: hunter-trial-1
+          TEXT: "Luật chơi không viết ra, nhưng ai phá luật đều phải trả giá."
+        run: |
+          set +e
+          python tools/voice_lab.py > "$RUNNER_TEMP/v1.log" 2>&1
+          rc=$?
+          cat "$RUNNER_TEMP/v1.log" | cut -c1-200
+          exit $rc
+
+      - name: Luu ban nghe thu 1
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          TARGET_REPO: phatnh91/dailybreadwithgod
+        run: bash tools/save_voice_preview.sh hunter-trial-1
+
+      - name: Doc thu ban 2
+        env:
+          CHANNEL: vi
+          VOICE: hunter-trial-2
+          TEXT: "Luật chơi không viết ra, nhưng ai phá luật đều phải trả giá."
+        run: |
+          set +e
+          python tools/voice_lab.py > "$RUNNER_TEMP/v2.log" 2>&1
+          rc=$?
+          cat "$RUNNER_TEMP/v2.log" | cut -c1-200
+          exit $rc
+
+      - name: Luu ban nghe thu 2
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          TARGET_REPO: phatnh91/dailybreadwithgod
+        run: bash tools/save_voice_preview.sh hunter-trial-2
