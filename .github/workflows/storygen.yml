@@ -60,6 +60,7 @@ jobs:
       - name: Soan ban nhap
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
           AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
         run: |
           set +e

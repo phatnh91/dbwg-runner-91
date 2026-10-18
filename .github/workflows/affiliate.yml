@@ -31,6 +31,10 @@ on:
         description: "Nhap tay (JSON: title, price, images) khi trang ban hang chan may chu"
         required: false
         default: ""
+      mode:
+        description: "Che do chay: full | build_final"
+        required: false
+        default: "full"
 
 permissions:
   contents: read
@@ -52,6 +56,7 @@ jobs:
           IN_VOICE: ${{ github.event.inputs.voice }}
           IN_ANGLE: ${{ github.event.inputs.angle }}
           IN_MANUAL: ${{ github.event.inputs.manual }}
+          IN_MODE: ${{ github.event.inputs.mode }}
         run: |
           # Dau vao di qua bien moi truong (khong noi thang vao lenh), va phai dung dang truoc khi chay bat cu thu gi
           [[ "$IN_URL" =~ ^https?://[A-Za-z0-9._~:/?#@!*,=%+-]{4,1500}$ ]] || { echo "::error::Link san pham khong hop le"; exit 1; }
@@ -59,6 +64,7 @@ jobs:
           [[ "$IN_JOB" =~ ^(aff-[0-9]{6,20})?$ ]] || { echo "::error::Ma luot chay khong hop le"; exit 1; }
           [[ "$IN_VOICE" =~ ^(female|male)$ ]] || { echo "::error::Giong doc khong hop le"; exit 1; }
           [[ "$IN_ANGLE" =~ ^(pas|review|beforeafter)$ ]] || { echo "::error::Huong kich ban khong hop le"; exit 1; }
+          [[ "$IN_MODE" =~ ^(full|build_final)?$ ]] || { echo "::error::Che do khong hop le"; exit 1; }
           [[ ${#IN_MANUAL} -le 6000 ]] || { echo "::error::Du lieu nhap tay qua dai"; exit 1; }
       - uses: actions/checkout@v4
         with:
@@ -76,6 +82,7 @@ jobs:
       - name: Chay quy trinh Affiliate
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
           SHOP_TELEGRAM_BOT_TOKEN: ${{ secrets.SHOP_TELEGRAM_BOT_TOKEN || secrets.TELEGRAM_BOT_TOKEN }}
           SHOP_TELEGRAM_CHAT_ID: ${{ secrets.SHOP_TELEGRAM_CHAT_ID || secrets.TELEGRAM_CHAT_ID }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
@@ -88,4 +95,5 @@ jobs:
           IN_VOICE: ${{ github.event.inputs.voice }}
           IN_ANGLE: ${{ github.event.inputs.angle }}
           IN_MANUAL: ${{ github.event.inputs.manual }}
-        run: python -m tools.affiliate.pipeline --url "$IN_URL" --chat-id "$IN_CHAT" --job-id "$IN_JOB" --voice "$IN_VOICE" --angle "$IN_ANGLE" --manual "$IN_MANUAL"
+          IN_MODE: ${{ github.event.inputs.mode }}
+        run: python -m tools.affiliate.pipeline --url "$IN_URL" --chat-id "$IN_CHAT" --job-id "$IN_JOB" --voice "$IN_VOICE" --angle "$IN_ANGLE" --manual "$IN_MANUAL" --mode "${IN_MODE:-full}"
