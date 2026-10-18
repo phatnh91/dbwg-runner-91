@@ -1,0 +1,34 @@
+name: 23 - Thu API doi Cong khai that (kho public)
+
+# Chi doc + doi tam thoi roi tra lai y nguyen. Dung de biet du an Google Cloud da qua
+# kiem duyet nang cao cua YouTube chua, truoc khi doi mac dinh privacy_status trong config.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Cai thu vien
+        run: pip install -r requirements.txt
+
+      - name: Thu tren kenh en (tap 1 Muoi hai tong do)
+        env:
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: python tools/tongdo_test_public_api.py --channel en --video-id bvwj-Nqyo_E
