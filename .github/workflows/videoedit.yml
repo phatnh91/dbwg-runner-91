@@ -1,0 +1,64 @@
+name: 18 - Chinh sua video (kho public)
+
+# Việc nặng của "Chỉnh sửa video": tải video từ R2, chạy ffmpeg chèn chữ theo mẫu, tải video kết quả lên R2.
+# Đặt ở .github/workflows/videoedit.yml của kho public (tools/public_runner/sync_public.bat chép sang).
+# Concurrency group theo job_id: 1 job chỉ chạy 1 lượt 1 lúc.
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "Mã job (ve-xxxx)"
+        required: true
+
+concurrency:
+  group: videoedit-${{ github.event.inputs.job_id }}
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Kiem tra dau vao
+        env:
+          JOB_ID: ${{ github.event.inputs.job_id }}
+        run: |
+          [[ "$JOB_ID" =~ ^ve-[a-zA-Z0-9_-]{4,32}$ ]] || { echo "::error::Mã job_id không hợp lệ"; exit 1; }
+      - name: Giu lai ffmpeg giua cac lan chay
+        uses: actions/cache@v4
+        with:
+          path: ~/ffmpeg-static
+          key: ffmpeg-static-v1-${{ runner.os }}
+      - name: Cai ffmpeg va thu vien
+        run: |
+          FF="$HOME/ffmpeg-static"
+          if ! [ -x "$FF/ffmpeg" ]; then
+            rm -rf "$FF"; mkdir -p "$FF"
+            curl -fsSL --retry 3 --max-time 240 -o "$RUNNER_TEMP/ff.tar.xz" "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-gpl-7.1.tar.xz" \
+              && tar -xJf "$RUNNER_TEMP/ff.tar.xz" -C "$FF" --wildcards '*/bin/ffmpeg' '*/bin/ffprobe' --strip-components=2 || rm -rf "$FF"
+          fi
+          if [ -x "$FF/ffmpeg" ]; then
+            echo "$FF" >> "$GITHUB_PATH"
+          else
+            which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+          fi
+          sudo apt-get install -y fonts-noto-core fonts-dejavu-core fontconfig || true
+          pip install -q requests
+      - name: Render video
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          TARGET_REPO: phatnh91/dailybreadwithgod
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          python tools/videoedit/render.py "${{ github.event.inputs.job_id }}"
