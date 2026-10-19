@@ -94,7 +94,7 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         id: tts
         run: |
-          if python3 -c "import json,sys; c=json.load(open('channels/${{ matrix.channel }}/config.json',encoding='utf-8')); sys.exit(0 if c.get('tts_provider')=='custom' else 1)"; then
+          if python3 -c "import json,sys; c=json.load(open('channels/${{ matrix.channel }}/config.json',encoding='utf-8')); sys.exit(0 if 'custom' in (c.get('tts_provider'), c.get('tts_backup_provider')) else 1)"; then
             echo "custom=true" >> "$GITHUB_OUTPUT"
           else
             echo "custom=false" >> "$GITHUB_OUTPUT"
