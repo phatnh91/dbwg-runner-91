@@ -164,7 +164,10 @@ jobs:
         run: |
           git config user.name "daily-bread-bot"
           git config user.email "daily-bread-bot@users.noreply.github.com"
-          git add -A channels/$CH/posted.csv channels/$CH/post_errors.json 2>/dev/null || git add channels/$CH/posted.csv 2>/dev/null || exit 0
+          # 19/10: chi git add posted.csv/post_errors.json nhung publish.py cung ghi channels/$CH/thumb_log.csv
+          # (anh binh rieng) - file nay con lai "unstaged" chan git pull --rebase ngay duoi (dang xong tren
+          # Facebook/Instagram/YouTube roi nhung ban ghi "da dang" khong len duoc main). Gop ca thu muc kenh.
+          git add -A channels/$CH 2>/dev/null || exit 0
           git diff --cached --quiet && exit 0
           git commit -m "Da dang ke chuyen ${{ steps.pick.outputs.series }} tap ${{ steps.pick.outputs.ep }} ($CH)"
           for i in 1 2 3 4 5; do

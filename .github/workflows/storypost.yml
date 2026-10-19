@@ -106,7 +106,9 @@ jobs:
         run: |
           git config user.name "daily-bread-bot"
           git config user.email "daily-bread-bot@users.noreply.github.com"
-          git add -A channels/${{ github.event.inputs.channel }}/posted.csv channels/${{ github.event.inputs.channel }}/post_errors.json 2>/dev/null || git add channels/${{ github.event.inputs.channel }}/posted.csv 2>/dev/null || exit 0
+          # 19/10: cung loi nhu storyauto.yml - publish.py con ghi channels/<ch>/thumb_log.csv ngoai pham vi
+          # git add nay, lam git pull --rebase ngay duoi bi chan vi "unstaged changes" du da dang xong thật.
+          git add -A channels/${{ github.event.inputs.channel }} 2>/dev/null || exit 0
           git diff --cached --quiet && exit 0
           git commit -m "Da dang ke chuyen ${{ github.event.inputs.series }} tap ${{ github.event.inputs.episode }} (${{ github.event.inputs.channel }})"
           for i in 1 2 3 4 5; do

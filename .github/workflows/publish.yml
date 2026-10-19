@@ -98,7 +98,7 @@ jobs:
       - name: Cài thư viện
         if: steps.gate.outputs.run == 'true'
         run: |
-          pip install requests
+          pip install requests Pillow
           which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)  # mã hóa lại khi Instagram từ chối video
 
       - name: Lấy video đã tạo hôm nay
@@ -158,7 +158,10 @@ jobs:
         run: |
           git config user.name "daily-bread-bot"
           git config user.email "daily-bread-bot@users.noreply.github.com"
-          git add -A channels/${{ matrix.channel }}/posted.csv channels/${{ matrix.channel }}/post_errors.json 2>/dev/null || git add channels/${{ matrix.channel }}/posted.csv 2>/dev/null || exit 0
+          # 19/10: git add chi liet ke posted.csv/post_errors.json - but.py cung ghi channels/<ch>/thumb_log.csv
+          # (anh binh rieng) nhu mot hieu ung phu, khong duoc git add o day -> con lai "unstaged", chan
+          # git pull --rebase ngay duoi (dang xong roi van mat ban ghi "da dang"). Gop ca thu muc kenh cho chac.
+          git add -A channels/${{ matrix.channel }} 2>/dev/null || exit 0
           git diff --cached --quiet && exit 0
           git commit -m "Đã đăng ${{ steps.gate.outputs.tag }}: $(date -u +%F)"
           for i in 1 2 3 4 5; do
