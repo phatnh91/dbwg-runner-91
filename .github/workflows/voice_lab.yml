@@ -30,6 +30,10 @@ on:
         description: "flat = nghỉ đều, natural = nghỉ tự nhiên. Trống = theo voice.json"
         required: false
         default: ""
+      temperature:
+        description: "Độ ngẫu nhiên khi đọc (0.5-1.3, cao hơn = bớt đều/máy móc nhưng dễ lạc nhịp hơn). Trống = theo voice.json"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -73,6 +77,7 @@ jobs:
           PAUSE: ${{ github.event.inputs.pause }}
           DENOISE: ${{ github.event.inputs.denoise }}
           PAUSE_MODE: ${{ github.event.inputs.pause_mode }}
+          TEMPERATURE: ${{ github.event.inputs.temperature }}
         # Log của kho public ai cũng đọc được: chỉ giữ dòng trạng thái và lỗi
         run: |
           set +e

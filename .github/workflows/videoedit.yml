@@ -1,6 +1,7 @@
 name: 18 - Chinh sua video (kho public)
 
 # Việc nặng của "Chỉnh sửa video": tải video từ R2, chạy ffmpeg chèn chữ theo mẫu, tải video kết quả lên R2.
+# Hoặc nhận dạng giọng nói tiếng Việt (transcribe) bằng Whisper / Gemini.
 # Đặt ở .github/workflows/videoedit.yml của kho public (tools/public_runner/sync_public.bat chép sang).
 # Concurrency group theo job_id: 1 job chỉ chạy 1 lượt 1 lúc.
 
@@ -10,6 +11,10 @@ on:
       job_id:
         description: "Mã job (ve-xxxx)"
         required: true
+      mode:
+        description: "render hoặc transcribe"
+        required: false
+        default: "render"
 
 concurrency:
   group: videoedit-${{ github.event.inputs.job_id }}
@@ -18,7 +23,7 @@ concurrency:
 jobs:
   render:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,29 +35,49 @@ jobs:
       - name: Kiem tra dau vao
         env:
           JOB_ID: ${{ github.event.inputs.job_id }}
+          VE_MODE: ${{ github.event.inputs.mode }}
         run: |
           [[ "$JOB_ID" =~ ^ve-[a-zA-Z0-9_-]{4,32}$ ]] || { echo "::error::Mã job_id không hợp lệ"; exit 1; }
+          VE_MODE="${VE_MODE:-render}"
+          [[ "$VE_MODE" =~ ^(render|transcribe)$ ]] || { echo "::error::mode không hợp lệ"; exit 1; }
       - name: Giu lai ffmpeg giua cac lan chay
         uses: actions/cache@v4
         with:
           path: ~/ffmpeg-static
           key: ffmpeg-static-v1-${{ runner.os }}
+      - name: Giu lai model Whisper giua cac lan chay
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: whisper-models-v1
       - name: Cai ffmpeg va thu vien
         run: |
           FF="$HOME/ffmpeg-static"
-          if ! [ -x "$FF/ffmpeg" ]; then
+          # Kiem tra ban cache/tai ve THAT SU co day du filter/encoder dang dung (ass burn-in phu de,
+          # libx264, aac) - truoc day chi kiem "-x" (co chay duoc khong) nen 1 lan tai loi (vd URL het
+          # han) se am tham lot qua, roi rot ve apt-get ffmpeg thieu filter ma khong ai biet.
+          ff_ok() { [ -x "$FF/ffmpeg" ] && [ -x "$FF/ffprobe" ] && "$FF/ffmpeg" -hide_banner -filters 2>/dev/null | grep -qw ass && "$FF/ffmpeg" -hide_banner -encoders 2>/dev/null | grep -q libx264 && "$FF/ffmpeg" -hide_banner -encoders 2>/dev/null | grep -qw aac; }
+          if ! ff_ok; then
             rm -rf "$FF"; mkdir -p "$FF"
-            curl -fsSL --retry 3 --max-time 240 -o "$RUNNER_TEMP/ff.tar.xz" "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-gpl-7.1.tar.xz" \
-              && tar -xJf "$RUNNER_TEMP/ff.tar.xz" -C "$FF" --wildcards '*/bin/ffmpeg' '*/bin/ffprobe' --strip-components=2 || rm -rf "$FF"
+            curl -fsSL --retry 3 --max-time 240 -o "$RUNNER_TEMP/ff.tar.xz" "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz" \
+              && tar -xJf "$RUNNER_TEMP/ff.tar.xz" -C "$FF" --wildcards '*/bin/ffmpeg' '*/bin/ffprobe' --strip-components=2
+            ff_ok || rm -rf "$FF"
           fi
           if [ -x "$FF/ffmpeg" ]; then
             echo "$FF" >> "$GITHUB_PATH"
+            FFBIN="$FF/ffmpeg"
           else
             which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+            FFBIN="ffmpeg"
           fi
+          # Chi canh bao (khong chan, vi on dinh rung la tuy chon bat/tat) - neu khong co vidstab thi tick
+          # "On dinh rung" se am tham khong lam gi (tung clip tu bo qua, chi thay canh bao rai rac trong log
+          # tung clip chu khong co 1 dong canh bao ro rang o day).
+          "$FFBIN" -hide_banner -filters 2>/dev/null | grep -qw vidstabdetect || echo "::warning title=vidstab::Ban ffmpeg dang dung KHONG co filter vidstab - tinh nang 'On dinh rung' se khong co tac dung (tung clip tu dong bo qua, dung clip goc)."
           sudo apt-get install -y fonts-noto-core fonts-dejavu-core fontconfig || true
           pip install -q requests
-      - name: Render video
+          pip install -q faster-whisper || echo "::warning title=Whisper::Không cài được faster-whisper, bước nhận giọng nói sẽ báo lỗi"
+      - name: Render hoac transcribe video
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
           TARGET_REPO: phatnh91/dailybreadwithgod
@@ -60,5 +85,10 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          JOB_ID: ${{ github.event.inputs.job_id }}
+          VE_MODE: ${{ github.event.inputs.mode }}
         run: |
-          python tools/videoedit/render.py "${{ github.event.inputs.job_id }}"
+          VE_MODE="${VE_MODE:-render}"
+          python tools/videoedit/render.py "$JOB_ID"
