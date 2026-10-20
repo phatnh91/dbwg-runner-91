@@ -134,7 +134,6 @@ jobs:
         if: github.event.inputs.step != 'publish' && github.event.inputs.step != 'check'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
           TARGET_REPO: phatnh91/dailybreadwithgod
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}

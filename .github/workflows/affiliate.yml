@@ -82,7 +82,6 @@ jobs:
       - name: Chay quy trinh Affiliate
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
           SHOP_TELEGRAM_BOT_TOKEN: ${{ secrets.SHOP_TELEGRAM_BOT_TOKEN || secrets.TELEGRAM_BOT_TOKEN }}
           SHOP_TELEGRAM_CHAT_ID: ${{ secrets.SHOP_TELEGRAM_CHAT_ID || secrets.TELEGRAM_CHAT_ID }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
