@@ -1,0 +1,74 @@
+name: Geography - approved episodes only
+run-name: Geography ${{ inputs.mode || 'scheduled' }} - ${{ inputs.episode || 'approved queue' }}
+on:
+  schedule:
+    # 20:45 Vietnam = 13:45 UTC. Follow-up checks catch runner delays; receipts prevent duplicates.
+    - cron: '45,55 13 * * 2,4,6'
+    - cron: '5,15,25 14 * * 2,4,6'
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Geography channel ID
+        default: geo-e1062f74-d7b
+        required: true
+      episode:
+        description: Episode ID (required for now/dry-run)
+        default: vietnam-shape
+      mode:
+        type: choice
+        options: [dry-run, now, scheduled]
+        default: dry-run
+permissions:
+  contents: read
+concurrency:
+  group: geography-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          ref: main
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate channel and mode
+        id: ids
+        env:
+          GEO_CHANNEL: ${{ inputs.channel || 'geo-e1062f74-d7b' }}
+          GEO_EPISODE: ${{ inputs.episode }}
+          GEO_MODE: ${{ inputs.mode || 'scheduled' }}
+        shell: bash
+        run: |
+          [[ "$GEO_CHANNEL" =~ ^[a-z0-9][a-z0-9-]{0,60}$ ]] || exit 1
+          [[ "$GEO_MODE" =~ ^(dry-run|now|scheduled)$ ]] || exit 1
+          if [[ "$GEO_MODE" != scheduled ]]; then [[ "$GEO_EPISODE" =~ ^[a-z0-9][a-z0-9-]{0,60}$ ]] || exit 1; fi
+          node -e 'const a=require("./app/api/_geography_automation")._test; require("fs").appendFileSync(process.env.GITHUB_OUTPUT,"suffix="+a.suffix(process.env.GEO_CHANNEL)+"\n")'
+      - name: Publish approved queue or explicit immediate request
+        env:
+          GEOGRAPHY_REPOSITORY: phatnh91/dailybreadwithgod
+          GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          GEOGRAPHY_APPROVAL_PUBLIC_KEY: ${{ vars.GEOGRAPHY_APPROVAL_PUBLIC_KEY }}
+          GEOGRAPHY_LIVE_ENABLED: '1'
+          GEO_CHANNEL_ID: ${{ inputs.channel || 'geo-e1062f74-d7b' }}
+          GEO_EPISODE: ${{ inputs.episode }}
+          GEO_MODE: ${{ inputs.mode || 'scheduled' }}
+          GEO_FB_PAGE_ID: ${{ secrets[format('FB_PAGE_ID{0}', steps.ids.outputs.suffix)] }}
+          GEO_FB_PAGE_TOKEN: ${{ secrets[format('FB_PAGE_TOKEN{0}', steps.ids.outputs.suffix)] }}
+          GEO_YT_CLIENT_ID: ${{ secrets[format('YT_CLIENT_ID{0}', steps.ids.outputs.suffix)] }}
+          GEO_YT_CLIENT_SECRET: ${{ secrets[format('YT_CLIENT_SECRET{0}', steps.ids.outputs.suffix)] }}
+          GEO_YT_REFRESH_TOKEN: ${{ secrets[format('YT_REFRESH_TOKEN{0}', steps.ids.outputs.suffix)] }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+        shell: bash
+        run: |
+          case "$GEO_MODE" in
+            now) node tools/geography/publish.cjs "--channel=$GEO_CHANNEL_ID" "--episode=$GEO_EPISODE" --now --live ;;
+            scheduled) node tools/geography/publish.cjs "--channel=$GEO_CHANNEL_ID" --scheduled --live ;;
+            *) node tools/geography/publish.cjs "--channel=$GEO_CHANNEL_ID" "--episode=$GEO_EPISODE" ;;
+          esac
