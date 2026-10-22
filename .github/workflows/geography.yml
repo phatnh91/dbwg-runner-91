@@ -2,9 +2,8 @@ name: Geography - approved episodes only
 run-name: Geography ${{ inputs.mode || 'scheduled' }} - ${{ inputs.episode || 'approved queue' }}
 on:
   schedule:
-    # 20:45 Vietnam = 13:45 UTC. Follow-up checks catch runner delays; receipts prevent duplicates.
-    - cron: '45,55 13 * * 2,4,6'
-    - cron: '5,15,25 14 * * 2,4,6'
+    # 10:15 Vietnam = 03:15 UTC. Follow-up checks catch runner delays; receipts prevent duplicates.
+    - cron: '15,25,35,45,55 3 * * *'
   workflow_dispatch:
     inputs:
       channel:

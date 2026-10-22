@@ -2,7 +2,7 @@ name: Geography - create drafts only
 run-name: Geography drafts - ${{ inputs.mode || 'next' }}
 on:
   schedule:
-    - cron: '15 2 * * 1,3,5'
+    - cron: '15 2 * * *'
   workflow_dispatch:
     inputs:
       mode:
