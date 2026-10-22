@@ -1,0 +1,80 @@
+name: Geography - create drafts only
+run-name: Geography drafts - ${{ inputs.mode || 'next' }}
+on:
+  schedule:
+    - cron: '15 2 * * 1,3,5'
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [next, extend, rebuild]
+        default: next
+      episode:
+        description: Episode ID for rebuild
+        default: dalat-cool
+permissions:
+  contents: read
+concurrency:
+  group: geography-draft-production
+  cancel-in-progress: false
+jobs:
+  create:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          ref: main
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate inputs
+        env:
+          MODE: ${{ inputs.mode || 'next' }}
+          EPISODE: ${{ inputs.episode }}
+        shell: bash
+        run: |
+          [[ "$MODE" =~ ^(next|extend|rebuild)$ ]] || exit 1
+          if [[ "$MODE" == rebuild ]]; then [[ "$EPISODE" =~ ^[a-z0-9][a-z0-9-]{0,60}$ ]] || exit 1; fi
+      - name: Install media tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg libegl1 libgles2 libgbm1 libasound2t64
+          pip install -r requirements.txt numpy
+      - name: Install custom voice and caption alignment
+        if: inputs.mode != 'rebuild' && inputs.mode != 'extend'
+        run: pip install vieneu==3.8.3 faster-whisper
+      - uses: actions/cache@v4
+        if: inputs.mode != 'rebuild' && inputs.mode != 'extend'
+        with:
+          path: ~/.cache/huggingface
+          key: geography-vieneu383-whisper-small-v1
+      - name: Install renderer
+        if: inputs.mode != 'extend'
+        working-directory: tools/geography/remotion
+        run: npm ci --no-audit --no-fund
+      - name: Produce private drafts
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          CHANNEL: vi
+          DRAFT_VOICE: '0'
+          GEO_BUILD_MODE: ${{ inputs.mode || 'next' }}
+          GEO_BUILD_EPISODE: ${{ inputs.episode }}
+          AI_PROVIDERS: ${{ vars.XOAI_AI_PROVIDERS }}
+          AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+        shell: bash
+        run: |
+          python tools/geography/build.py "--mode=$GEO_BUILD_MODE" "--episode=$GEO_BUILD_EPISODE" > "$RUNNER_TEMP/geography-build.log" 2>&1 || { echo '::error::Geography draft failed; inspect private build status in Studio. No video was published.'; exit 1; }
+          echo 'Geography draft task completed. No social upload or approval.'
