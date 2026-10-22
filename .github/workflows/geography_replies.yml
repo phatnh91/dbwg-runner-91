@@ -1,0 +1,99 @@
+name: 30 - Tra loi binh luan Video dia ly (kho public)
+
+# Dat o .github/workflows/geography_replies.yml cua kho public (sync_public.bat tu chep).
+# Moi 2 gio (lech voi workflow 16 cua 4 trang Loi Chua de khong cung chay mot luc): doc binh luan moi
+# duoi cac tap Video dia ly DA DANG THAT (geography/automation/<kenh>.json), AI soan tra loi.
+# Binh luan lanh (cam on, khen, hoi) tu tra loi; con lai gui Telegram de duyet: /gui <ma> hoac /bo <ma>.
+# Mo rong them kenh dia ly moi: them vao "channels" o duoi, giong cach workflow Geography (29) lam.
+on:
+  schedule:
+    - cron: "37 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Ma kenh dia ly (geography/channels.json)"
+        required: true
+        default: "geo-e1062f74-d7b"
+      dry:
+        description: "1 = chay thu, khong gui tra loi nao"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: geography-replies
+  cancel-in-progress: false
+
+jobs:
+  replies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        channel: [geo-e1062f74-d7b]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Doi ma giu kenh + nguon mã YouTube (chung hay rieng)
+        id: ids
+        env:
+          GEO_CHANNEL: ${{ github.event.inputs.channel || matrix.channel }}
+        shell: bash
+        run: |
+          [[ "$GEO_CHANNEL" =~ ^[a-z0-9][a-z0-9-]{0,60}$ ]] || exit 1
+          node -e '
+            const fs=require("fs");
+            const a=require("./app/api/_geography_automation")._test;
+            let src="channel";
+            try{
+              const auto=JSON.parse(fs.readFileSync("geography/automation/"+process.env.GEO_CHANNEL+".json","utf8"));
+              src=(auto.connections&&auto.connections.youtube&&auto.connections.youtube.client_source)||"channel";
+            }catch(e){}
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,"suffix="+a.suffix(process.env.GEO_CHANNEL)+"\nyt_global="+(src==="global")+"\n");
+          '
+      - name: Tra loi binh luan
+        env:
+          GEO_CHANNEL: ${{ github.event.inputs.channel || matrix.channel }}
+          INPUT_DRY: ${{ github.event.inputs.dry }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
+          FB_PAGE_TOKEN: ${{ secrets[format('FB_PAGE_TOKEN{0}', steps.ids.outputs.suffix)] }}
+          YT_REFRESH_TOKEN: ${{ secrets[format('YT_REFRESH_TOKEN{0}', steps.ids.outputs.suffix)] }}
+          YT_CLIENT_ID: ${{ steps.ids.outputs.yt_global == 'true' && secrets.YT_CLIENT_ID || secrets[format('YT_CLIENT_ID{0}', steps.ids.outputs.suffix)] }}
+          YT_CLIENT_SECRET: ${{ steps.ids.outputs.yt_global == 'true' && secrets.YT_CLIENT_SECRET || secrets[format('YT_CLIENT_SECRET{0}', steps.ids.outputs.suffix)] }}
+        run: |
+          args=""; [ "$INPUT_DRY" = "1" ] && args="--dry"
+          python geo_reply_comments.py --channel "$GEO_CHANNEL" $args > "$RUNNER_TEMP/r.log" 2>&1 || { echo "::warning title=Tra loi binh luan dia ly::$GEO_CHANNEL loi"; cat "$RUNNER_TEMP/r.log" | grep -E "Traceback|Error" | tail -5; exit 1; }
+          grep -E "Bình luận mới|Đã tự trả lời|lỗi|Lỗi|Traceback|Error" "$RUNNER_TEMP/r.log" | cut -c1-160 | head -12
+
+      - name: Luu trang thai (tranh tra loi hai lan)
+        if: always()
+        run: |
+          git config user.name "daily-bread-bot"
+          git config user.email "daily-bread-bot@users.noreply.github.com"
+          git add -A geography/replies/ 2>/dev/null || true
+          git diff --cached --quiet && exit 0
+          git commit -m "Video địa lý: trạng thái trả lời bình luận $(date -u +%F-%H%M)"
+          for i in 1 2 3 4 5; do
+            git pull --rebase && git push && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
