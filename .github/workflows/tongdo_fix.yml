@@ -1,27 +1,19 @@
-name: 28 - Sua ma Instagram Tong Do sai (kho public)
+name: 29 - Them biet danh Tong Do vao mo ta YouTube (kho public)
 
-# Viec mot lan: 3 bai Tong Do dang tay hoi 14-19/10 (tap 3, 5 tren EN; tap 6 tren VI) bi ghi nham short code
-# cua link bai (vd DekIW1JH_tG) thay vi media id thuc vao channels/<trang>/posted.csv, nen Instagram tu choi
-# cau "doc binh luan" (loi "Object does not exist") moi lan workflow 16 chay. Workflow nay do trong danh sach
-# media cua trang de tim media id dung roi sua lai 3 dong do. Chay tay, matrix ca 2 trang (trang khong co ma
-# sai thi tu bo qua, xem tools/fix_ig_media_ids.py).
+# Viec mot lan: theo tu khoa YouTube Studio AI tra loi anh Hunter (22/10), viewer tim "Sons of Zebedee"
+# (Gia-co, Giang), "Levi" (Ma-thi-o), "Didymus" (Tho-ma) nhieu hon ten rieng. Noi them 1 dong bien danh
+# vao CUOI mo ta 4 video da dang (tap 4,5,8,9, trang EN), khong doi gi khac. Dung lai
+# bot.youtube.append_description() (da co, tu bo qua neu da noi roi). Xem tools/add_apostle_aliases.py.
 on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   fix:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      matrix:
-        include:
-          - channel: en
-            suffix: ""
-          - channel: vi
-            suffix: "_VI"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,23 +23,10 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install requests
-      - name: Do va sua media id
+      - name: Noi bien danh vao mo ta
         env:
-          CHANNEL: ${{ matrix.channel }}
-          FB_PAGE_ID: ${{ secrets[format('FB_PAGE_ID{0}', matrix.suffix)] }}
-          FB_PAGE_TOKEN: ${{ secrets[format('FB_PAGE_TOKEN{0}', matrix.suffix)] }}
-        run: python tools/fix_ig_media_ids.py
-      - name: Ghi lai posted.csv da sua
-        if: always()
-        continue-on-error: true
-        run: |
-          git config user.name "daily-bread-bot"
-          git config user.email "daily-bread-bot@users.noreply.github.com"
-          git add channels/${{ matrix.channel }}/posted.csv
-          git diff --cached --quiet && exit 0
-          git commit -m "Sua ma Instagram sai cua ${{ matrix.channel }} (tong-do, doc binh luan loi)"
-          for i in 1 2 3 4 5; do
-            git pull --rebase && git push && exit 0
-            sleep $((i * 5))
-          done
-          exit 1
+          CHANNEL: en
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+        run: python tools/add_apostle_aliases.py
