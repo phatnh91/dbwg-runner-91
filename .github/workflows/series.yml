@@ -162,7 +162,7 @@ jobs:
         run: |
           git config user.name "daily-bread-bot"
           git config user.email "daily-bread-bot@users.noreply.github.com"
-          git add channels/${{ matrix.channel }}/posted.csv 2>/dev/null || exit 0
+          git add -A channels/${{ matrix.channel }}/posted.csv channels/${{ matrix.channel }}/post_errors.json 2>/dev/null || git add channels/${{ matrix.channel }}/posted.csv 2>/dev/null || exit 0
           git diff --cached --quiet && exit 0
           git commit -m "Đã đăng phim bộ ${{ needs.plan.outputs.series }} tập ${{ needs.plan.outputs.episode }} (${{ matrix.channel }})"
           for i in 1 2 3 4 5; do
