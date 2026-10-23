@@ -19,6 +19,7 @@ on:
         default: dry-run
 permissions:
   contents: read
+  id-token: write
 concurrency:
   group: geography-publication
   cancel-in-progress: false
@@ -70,4 +71,17 @@ jobs:
             now) node tools/geography/publish.cjs "--channel=$GEO_CHANNEL_ID" "--episode=$GEO_EPISODE" --now --live ;;
             scheduled) node tools/geography/publish.cjs "--channel=$GEO_CHANNEL_ID" --scheduled --live ;;
             *) node tools/geography/publish.cjs "--channel=$GEO_CHANNEL_ID" "--episode=$GEO_EPISODE" ;;
+          esac
+      - name: TikTok draft auto-send (approved + bound episodes only)
+        if: always() && steps.ids.outcome == 'success'
+        env:
+          GEO_CHANNEL_ID: ${{ inputs.channel || 'geo-e1062f74-d7b' }}
+          GEO_EPISODE: ${{ inputs.episode }}
+          GEO_MODE: ${{ inputs.mode || 'scheduled' }}
+        shell: bash
+        run: |
+          case "$GEO_MODE" in
+            scheduled) node tools/geography/tiktok-inbox.cjs "--channel=$GEO_CHANNEL_ID" ;;
+            dry-run) node tools/geography/tiktok-inbox.cjs "--channel=$GEO_CHANNEL_ID" "--episode=$GEO_EPISODE" --dry-run ;;
+            *) node tools/geography/tiktok-inbox.cjs "--channel=$GEO_CHANNEL_ID" "--episode=$GEO_EPISODE" ;;
           esac
