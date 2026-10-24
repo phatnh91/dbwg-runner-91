@@ -7,11 +7,14 @@ on:
     inputs:
       mode:
         type: choice
-        options: [next, extend, rebuild]
+        options: [next, extend, rebuild, studio, smoke]
         default: next
       episode:
         description: Episode ID for rebuild
         default: dalat-cool
+      request:
+        description: Immutable Studio request ID
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -38,9 +41,11 @@ jobs:
         env:
           MODE: ${{ inputs.mode || 'next' }}
           EPISODE: ${{ inputs.episode }}
+          REQUEST: ${{ inputs.request }}
         shell: bash
         run: |
-          [[ "$MODE" =~ ^(next|extend|rebuild)$ ]] || exit 1
+          [[ "$MODE" =~ ^(next|extend|rebuild|studio|smoke)$ ]] || exit 1
+          if [[ "$MODE" == studio ]]; then [[ "$REQUEST" =~ ^greq-[a-f0-9]{24}$ ]] || exit 1; fi
           if [[ "$MODE" == rebuild ]]; then [[ "$EPISODE" =~ ^[a-z0-9][a-z0-9-]{0,60}$ ]] || exit 1; fi
       - name: Install media tools
         run: |
@@ -66,6 +71,7 @@ jobs:
           DRAFT_VOICE: '0'
           GEO_BUILD_MODE: ${{ inputs.mode || 'next' }}
           GEO_BUILD_EPISODE: ${{ inputs.episode }}
+          GEO_BUILD_REQUEST: ${{ inputs.request }}
           AI_PROVIDERS: ${{ vars.XOAI_AI_PROVIDERS }}
           AI_CONFIG_SECRET: ${{ secrets.AI_CONFIG_SECRET }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -76,5 +82,9 @@ jobs:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
         shell: bash
         run: |
-          python tools/geography/build.py "--mode=$GEO_BUILD_MODE" "--episode=$GEO_BUILD_EPISODE" > "$RUNNER_TEMP/geography-build.log" 2>&1 || { echo '::error::Geography draft failed; inspect private build status in Studio. No video was published.'; exit 1; }
+          if [[ "$GEO_BUILD_MODE" == smoke ]]; then
+            python tools/geography/studio_smoke.py > "$RUNNER_TEMP/geography-build.log" 2>&1 || { echo '::error::Studio private smoke failed; no episode or publication was created.'; exit 1; }
+            exit 0
+          fi
+          python tools/geography/build.py "--mode=$GEO_BUILD_MODE" "--episode=$GEO_BUILD_EPISODE" "--request=$GEO_BUILD_REQUEST" > "$RUNNER_TEMP/geography-build.log" 2>&1 || { echo '::error::Geography draft failed; inspect private build status in Studio. No video was published.'; exit 1; }
           echo 'Geography draft task completed. No social upload or approval.'
