@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       channel:
-        description: "Trang: en, vi, annhien, luatchoi (nhiều trang cách nhau dấu phẩy, vd en,vi). Để trống = tất cả"
+        description: "Trang: en, vi, annhien, luatchoi, congso (nhiều trang cách nhau dấu phẩy, vd en,vi). Để trống = tất cả"
         required: false
         default: ""
       slot:
@@ -45,6 +45,8 @@ jobs:
             slot: noon
             cron: "47 0 * * *|31 1 * * *"
           - channel: luatchoi
+            cron: "47 2 * * *|31 3 * * *"
+          - channel: congso
             cron: "47 2 * * *|31 3 * * *"
     steps:
       - uses: actions/checkout@v4

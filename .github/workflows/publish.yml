@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       channel:
-        description: "Trang: en, vi, annhien, luatchoi (nhiều trang cách nhau dấu phẩy, vd en,vi). Để trống = tất cả"
+        description: "Trang: en, vi, annhien, luatchoi, congso (nhiều trang cách nhau dấu phẩy, vd en,vi). Để trống = tất cả"
         required: false
         default: ""
       slot:
@@ -39,7 +39,8 @@ jobs:
       fail-fast: false
       matrix:
         # suffix: đuôi tên secret của trang. Trang en dùng FB_PAGE_ID / FB_PAGE_TOKEN,
-        # trang vi dùng FB_PAGE_ID_VI / FB_PAGE_TOKEN_VI, trang annhien dùng FB_PAGE_ID_AN / FB_PAGE_TOKEN_AN, trang luatchoi dùng FB_PAGE_ID_LC / FB_PAGE_TOKEN_LC.
+        # trang vi dùng FB_PAGE_ID_VI / FB_PAGE_TOKEN_VI, trang annhien dùng FB_PAGE_ID_AN / FB_PAGE_TOKEN_AN, trang luatchoi dùng FB_PAGE_ID_LC / FB_PAGE_TOKEN_LC,
+        # trang congso dùng YT_REFRESH_TOKEN_CS (không có FB_PAGE_ID_CS/FB_PAGE_TOKEN_CS: đăng Facebook nửa tự động qua Telegram, xem facebook_manual trong config kênh).
         # cron: những lịch nào (ở mục on.schedule, cách nhau bởi |) thì đăng trang này. Chạy tay thì không xét cron.
         include:
           - channel: en
@@ -57,6 +58,9 @@ jobs:
             cron: "53 4 * * *|38 5 * * *"
           - channel: luatchoi
             suffix: "_LC"
+            cron: "53 11 * * *|38 12 * * *"
+          - channel: congso
+            suffix: "_CS"
             cron: "53 11 * * *|38 12 * * *"
     steps:
       - uses: actions/checkout@v4
@@ -158,9 +162,9 @@ jobs:
         run: |
           git config user.name "daily-bread-bot"
           git config user.email "daily-bread-bot@users.noreply.github.com"
-          # 19/10: git add chi liet ke posted.csv/post_errors.json - but.py cung ghi channels/<ch>/thumb_log.csv
-          # (anh binh rieng) nhu mot hieu ung phu, khong duoc git add o day -> con lai "unstaged", chan
-          # git pull --rebase ngay duoi (dang xong roi van mat ban ghi "da dang"). Gop ca thu muc kenh cho chac.
+          # 19/10: git add chỉ liệt kê posted.csv/post_errors.json - but.py còn ghi channels/<ch>/thumb_log.csv
+          # (ảnh bìa riêng) như một hiệu ứng phụ, không được git add ở đây -> còn lại "unstaged", chặn
+          # git pull --rebase ngay dưới (đăng xong rồi vẫn mất bản ghi "đã đăng"). Gộp cả thư mục kênh cho chắc.
           git add -A channels/${{ matrix.channel }} 2>/dev/null || exit 0
           git diff --cached --quiet && exit 0
           git commit -m "Đã đăng ${{ steps.gate.outputs.tag }}: $(date -u +%F)"
