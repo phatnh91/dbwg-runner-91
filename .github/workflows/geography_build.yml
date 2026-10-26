@@ -7,7 +7,7 @@ on:
     inputs:
       mode:
         type: choice
-        options: [next, extend, rebuild, studio, smoke]
+        options: [next, extend, rebuild, studio, smoke, audit]
         default: next
       episode:
         description: Episode ID for rebuild
@@ -44,7 +44,7 @@ jobs:
           REQUEST: ${{ inputs.request }}
         shell: bash
         run: |
-          [[ "$MODE" =~ ^(next|extend|rebuild|studio|smoke)$ ]] || exit 1
+          [[ "$MODE" =~ ^(next|extend|rebuild|studio|smoke|audit)$ ]] || exit 1
           if [[ "$MODE" == studio ]]; then [[ "$REQUEST" =~ ^greq-[a-f0-9]{24}$ ]] || exit 1; fi
           if [[ "$MODE" == rebuild ]]; then [[ "$EPISODE" =~ ^[a-z0-9][a-z0-9-]{0,60}$ ]] || exit 1; fi
       - name: Install media tools
@@ -61,7 +61,7 @@ jobs:
           path: ~/.cache/huggingface
           key: geography-vieneu383-whisper-small-v1
       - name: Install renderer
-        if: inputs.mode != 'extend'
+        if: inputs.mode != 'extend' && inputs.mode != 'audit'
         working-directory: tools/geography/remotion
         run: npm ci --no-audit --no-fund
       - name: Produce private drafts
