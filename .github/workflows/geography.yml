@@ -25,6 +25,12 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        channel: ${{ github.event_name == 'schedule' && fromJSON('["geo-e1062f74-d7b","geo-earth-has-stories"]') || fromJSON(format('["{0}"]', inputs.channel)) }}
+    name: Approved queue ${{ matrix.channel }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -40,7 +46,7 @@ jobs:
       - name: Validate channel and mode
         id: ids
         env:
-          GEO_CHANNEL: ${{ inputs.channel || 'geo-e1062f74-d7b' }}
+          GEO_CHANNEL: ${{ matrix.channel }}
           GEO_EPISODE: ${{ inputs.episode }}
           GEO_MODE: ${{ inputs.mode || 'scheduled' }}
         shell: bash
@@ -55,7 +61,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
           GEOGRAPHY_APPROVAL_PUBLIC_KEY: ${{ vars.GEOGRAPHY_APPROVAL_PUBLIC_KEY }}
           GEOGRAPHY_LIVE_ENABLED: '1'
-          GEO_CHANNEL_ID: ${{ inputs.channel || 'geo-e1062f74-d7b' }}
+          GEO_CHANNEL_ID: ${{ matrix.channel }}
           GEO_EPISODE: ${{ inputs.episode }}
           GEO_MODE: ${{ inputs.mode || 'scheduled' }}
           GEO_FB_PAGE_ID: ${{ secrets[format('FB_PAGE_ID{0}', steps.ids.outputs.suffix)] }}
@@ -73,9 +79,9 @@ jobs:
             *) node tools/geography/publish.cjs "--channel=$GEO_CHANNEL_ID" "--episode=$GEO_EPISODE" ;;
           esac
       - name: TikTok draft auto-send (approved + bound episodes only)
-        if: always() && steps.ids.outcome == 'success'
+        if: always() && steps.ids.outcome == 'success' && matrix.channel != 'geo-earth-has-stories'
         env:
-          GEO_CHANNEL_ID: ${{ inputs.channel || 'geo-e1062f74-d7b' }}
+          GEO_CHANNEL_ID: ${{ matrix.channel }}
           GEO_EPISODE: ${{ inputs.episode }}
           GEO_MODE: ${{ inputs.mode || 'scheduled' }}
         shell: bash

@@ -7,7 +7,7 @@ on:
     inputs:
       mode:
         type: choice
-        options: [next, extend, rebuild, studio, smoke, audit]
+        options: [next, extend, rebuild, studio, smoke, audit, english-next]
         default: next
       episode:
         description: Episode ID for rebuild
@@ -22,6 +22,12 @@ concurrency:
   cancel-in-progress: false
 jobs:
   create:
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        edition: ${{ fromJSON(github.event_name == 'schedule' && '["vi","en"]' || '["manual"]') }}
+    name: Draft ${{ matrix.edition }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -39,24 +45,24 @@ jobs:
           node-version: '22'
       - name: Validate inputs
         env:
-          MODE: ${{ inputs.mode || 'next' }}
+          MODE: ${{ matrix.edition == 'en' && 'english-next' || inputs.mode || 'next' }}
           EPISODE: ${{ inputs.episode }}
           REQUEST: ${{ inputs.request }}
         shell: bash
         run: |
-          [[ "$MODE" =~ ^(next|extend|rebuild|studio|smoke|audit)$ ]] || exit 1
+          [[ "$MODE" =~ ^(next|extend|rebuild|studio|smoke|audit|english-next)$ ]] || exit 1
           if [[ "$MODE" == studio ]]; then [[ "$REQUEST" =~ ^greq-[a-f0-9]{24}$ ]] || exit 1; fi
           if [[ "$MODE" == rebuild ]]; then [[ "$EPISODE" =~ ^[a-z0-9][a-z0-9-]{0,60}$ ]] || exit 1; fi
       - name: Install media tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg libegl1 libgles2 libgbm1 libasound2t64
-          pip install -r requirements.txt numpy
+          pip install -r requirements.txt numpy faster-whisper
       - name: Install custom voice and caption alignment
-        if: inputs.mode != 'rebuild' && inputs.mode != 'extend'
+        if: matrix.edition != 'en' && inputs.mode != 'english-next' && inputs.mode != 'rebuild' && inputs.mode != 'extend'
         run: pip install vieneu==3.8.3 faster-whisper
       - uses: actions/cache@v4
-        if: inputs.mode != 'rebuild' && inputs.mode != 'extend'
+        if: matrix.edition != 'en' && inputs.mode != 'english-next' && inputs.mode != 'rebuild' && inputs.mode != 'extend'
         with:
           path: ~/.cache/huggingface
           key: geography-vieneu383-whisper-small-v1
@@ -69,7 +75,8 @@ jobs:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
           CHANNEL: vi
           DRAFT_VOICE: '0'
-          GEO_BUILD_MODE: ${{ inputs.mode || 'next' }}
+          GEOGRAPHY_APPROVAL_PUBLIC_KEY: ${{ vars.GEOGRAPHY_APPROVAL_PUBLIC_KEY }}
+          GEO_BUILD_MODE: ${{ matrix.edition == 'en' && 'english-next' || inputs.mode || 'next' }}
           GEO_BUILD_EPISODE: ${{ inputs.episode }}
           GEO_BUILD_REQUEST: ${{ inputs.request }}
           AI_PROVIDERS: ${{ vars.XOAI_AI_PROVIDERS }}
