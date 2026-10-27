@@ -4,6 +4,8 @@ name: 14 - Ke chuyen + Dang (kho public)
 # Can secret nhu publish.yml cua kho public: PRIVATE_REPO_TOKEN (Contents: Read and write), FB_PAGE_ID_VI, FB_PAGE_TOKEN_VI, YT_CLIENT_ID, YT_CLIENT_SECRET, YT_REFRESH_TOKEN_VI, R2_*, TELEGRAM_*, PEXELS_API_KEY, GEMINI_API_KEY, AI_CONFIG_SECRET.
 # Chay tay: Actions -> workflow nay -> Run workflow. Mac dinh chi dang cac nen tang ghi o o "only".
 # Bao cao tung nen tang (da dang / bi chan vi ly do gi) gui qua Telegram; bai da dang duoc ghi vao channels/<kenh>/posted.csv de khong dang trung.
+# 27/10: tach "pip install" khoi buoc cai ffmpeg (xem storyauto.yml) de thu vien Python (gom "requests" ma
+# bot/notify.py can) luon san sang du ffmpeg cai cham/loi.
 on:
   workflow_dispatch:
     inputs:
@@ -51,12 +53,13 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Cai ffmpeg, font va thu vien
+      - name: Cai thu vien Python
+        run: pip install -r requirements.txt numpy
+      - name: Cai ffmpeg, font
         timeout-minutes: 10
         run: |
           # Font da nam trong assets/fonts; may ubuntu-latest co san ffmpeg (khong apt-get: tai font Noto rat lau)
           which ffmpeg || (sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg)
-          pip install -r requirements.txt numpy
       - name: Dung tap
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

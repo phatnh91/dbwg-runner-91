@@ -6,6 +6,11 @@ name: 15 - Ke chuyen tu dong (3 tap/tuan, vi + en, kho public)
 # Tat bang cach dat "auto": false trong series/<bo>/outline.json. Can cung secret nhu storypost.yml.
 # Bo: mac dinh "auto" = story_next.py tu chon bo dang chay (theo "order" trong outline.json; bo sau chi bat dau khi bo truoc het tap).
 # Tap chi duoc dang khi co kich ban VA "approved": true trong outline.json (anh duyet tren app).
+# 27/10: tap 10 (tong-do, trang en) loi ngay 23/10 vi apt-get cai ffmpeg cham (mirror Ubuntu), het 10 phut cua
+# buoc "Cai ffmpeg va thu vien" truoc khi kip chay "pip install" cung buoc - buoc "Bao loi qua Telegram" sau do
+# cung crash vi thieu "requests" (nam trong requirements.txt, chua duoc cai), nen anh Hunter khong duoc bao loi.
+# Da tach "pip install" ra buoc rieng chay TRUOC buoc cai ffmpeg, de du ffmpeg cai cham/loi thi thu vien Python
+# van san sang cho buoc bao loi dung sau.
 on:
   schedule:
     - cron: "47 4 * * 1,3,5"   # vi ~11:47 VN
@@ -96,12 +101,13 @@ jobs:
           git add channels/$CH/story_auto.json
           git commit -m "Ke chuyen tu dong: thu tap $EP ($SERIES)" -q
           for i in 1 2 3 4 5; do git pull --rebase -q && git push -q && break; sleep $((i * 5)); done
-      - name: Cai ffmpeg va thu vien
+      - name: Cai thu vien Python
+        if: steps.pick.outputs.ep != ''
+        run: pip install -r requirements.txt numpy
+      - name: Cai ffmpeg
         if: steps.pick.outputs.ep != ''
         timeout-minutes: 10
-        run: |
-          which ffmpeg || (sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg)
-          pip install -r requirements.txt numpy
+        run: which ffmpeg || (sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg)
       - name: Dung tap
         if: steps.pick.outputs.ep != ''
         env:
