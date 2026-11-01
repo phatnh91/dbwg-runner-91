@@ -140,6 +140,13 @@ jobs:
           set +e
           python generate.py > "$RUNNER_TEMP/gen.log" 2>&1
           rc=$?
+          # 1/11: AI viết hỏng kịch bản (hết lượt viết lại) thì cả ngày không có video, không ai tạo lại -> tự chạy lại 1 lần
+          if [ $rc -ne 0 ] && grep -q "AI không viết được kịch bản" "$RUNNER_TEMP/gen.log"; then
+            echo "::warning::Kịch bản lỗi lần 1, tự tạo lại một lần"
+            tail -n 1 "$RUNNER_TEMP/gen.log" | cut -c1-200
+            python generate.py > "$RUNNER_TEMP/gen.log" 2>&1
+            rc=$?
+          fi
           grep -E "Tổng thời lượng|Đã lưu|CẢNH BÁO|vượt giới hạn|AI lỗi|HTTP [0-9]{3}|cấu hình AI|giải mã|AI_CONFIG_SECRET|AI đang dùng|AI dự phòng|CẢNH BÁO giọng" "$RUNNER_TEMP/gen.log" | cut -c1-200 | head -30
           if [ $rc -ne 0 ]; then echo "Lỗi (mã $rc), 5 dòng cuối:"; tail -n 5 "$RUNNER_TEMP/gen.log" | cut -c1-200; fi
           exit $rc
