@@ -4,6 +4,9 @@ on:
   schedule:
     # 10:15 Vietnam = 03:15 UTC. Follow-up checks catch runner delays; receipts prevent duplicates.
     - cron: '15,25,35,45,55 3 * * *'
+    # Optional second daily slot 20:45 Vietnam = 13:45 UTC (only used when the channel schedule has times 10:15 + 20:45).
+    - cron: '45,55 13 * * *'
+    - cron: '5,15,25,35 14 * * *'
   workflow_dispatch:
     inputs:
       channel:
@@ -29,10 +32,10 @@ jobs:
       max-parallel: 1
       fail-fast: false
       matrix:
-        channel: ${{ github.event_name == 'schedule' && fromJSON('["geo-e1062f74-d7b","geo-earth-has-stories"]') || fromJSON(format('["{0}"]', inputs.channel)) }}
+        channel: ${{ (github.event_name == 'schedule' || inputs.mode == 'scheduled') && fromJSON('["geo-e1062f74-d7b","geo-earth-has-stories"]') || fromJSON(format('["{0}"]', inputs.channel)) }}
     name: Approved queue ${{ matrix.channel }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 110
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,6 +58,13 @@ jobs:
           [[ "$GEO_MODE" =~ ^(dry-run|now|scheduled)$ ]] || exit 1
           if [[ "$GEO_MODE" != scheduled ]]; then [[ "$GEO_EPISODE" =~ ^[a-z0-9][a-z0-9-]{0,60}$ ]] || exit 1; fi
           node -e 'const a=require("./app/api/_geography_automation")._test; require("fs").appendFileSync(process.env.GITHUB_OUTPUT,"suffix="+a.suffix(process.env.GEO_CHANNEL)+"\n")'
+      - name: Wait for the 10:15 Vietnam slot
+        # Vercel cron dispatches this some time between 09:00 and 09:59 VN; publish.cjs only posts once the slot is due.
+        if: inputs.mode == 'scheduled'
+        shell: bash
+        run: |
+          now=$(date -u +%s); slot=$(date -u -d "$(date -u +%F) 03:15:30" +%s); wait=$((slot-now))
+          if (( wait > 0 && wait <= 5400 )); then echo "Waiting ${wait}s for 10:15 VN"; sleep "$wait"; fi
       - name: Publish approved queue or explicit immediate request
         env:
           GEOGRAPHY_REPOSITORY: phatnh91/dailybreadwithgod
