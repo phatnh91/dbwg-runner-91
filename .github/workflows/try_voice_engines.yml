@@ -69,6 +69,7 @@ jobs:
         continue-on-error: true
         run: |
           python -m venv "$RUNNER_TEMP/vv" && . "$RUNNER_TEMP/vv/bin/activate"
+          pip install -q torch --index-url https://download.pytorch.org/whl/cpu
           pip install -q "vietvoicetts[cpu] @ git+https://github.com/nguyenvulebinh/VietVoice-TTS.git"
           cat > "$RUNNER_TEMP/vv.py" <<'PY'
           import os, time
