@@ -1,0 +1,106 @@
+name: 31 - So sanh cong cu giong doc cho luatchoi (kho public)
+
+# Doc CUNG MOT doan luatchoi bang: giong hien tai (VieNeu, hunter-low-tone, dung engine "custom" cua bot),
+# KorvaTTS (5 giong nam co san, Apache-2.0) va VietVoice-TTS (MIT: clone giong hunter-low-tone + giong nam mien Bac co san).
+# Chi tao file nghe thu (artifact "so-sanh-giong"), KHONG doi giong cua trang, KHONG dang gi.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TEXT: "Bốn mươi ngàn tiền gửi xe là cái giá cho lần nhờ vác hộ. Đó không phải là sự bất cẩn nhỏ. Lần thứ hai họ lỡ tay làm hỏng tài liệu của bạn, bạn vẫn tự nhủ họ chỉ thiếu tập trung. Nhưng đây mới là điều ít ai nhận ra. Sự vụng về lặp lại ba lần chính là lựa chọn có ý thức. Sếp nhắn deadline lúc mười giờ đêm trên Zalo, rồi hỏi sao file report chưa xong. Đừng gán ác ý cho sự vụng về, nhưng lặp lại ba lần thì đừng gọi là vụng."
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: phatnh91/dailybreadwithgod
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cai ffmpeg
+        run: which ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+
+      - name: Nho model giua cac lan chay
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: vieneu-v3-turbo-hf
+
+      - name: 1) Giong hien tai (VieNeu, hunter-low-tone)
+        env:
+          CHANNEL: luatchoi
+          VOICE: hunter-low-tone
+        run: |
+          mkdir -p "$RUNNER_TEMP/raw"
+          pip install -q -r requirements.txt -r requirements-tts.txt
+          start=$(date +%s)
+          python tools/voice_lab.py 2>&1 | cut -c1-200
+          echo "VieNeu: $(( $(date +%s) - start ))s"
+          cp out/voice_lab/preview.mp3 "$RUNNER_TEMP/raw/1-hien-tai-vieneu-hunter.mp3"
+
+      - name: 2) KorvaTTS (5 giong nam co san)
+        continue-on-error: true
+        run: |
+          python -m venv "$RUNNER_TEMP/korva" && . "$RUNNER_TEMP/korva/bin/activate"
+          pip install -q korvatts
+          cat > "$RUNNER_TEMP/korva.py" <<'PY'
+          import os, time
+          from korvatts import TTS
+          tts = TTS()
+          print("Giong co san:", tts.list_voices())
+          for v in ["gia_bao", "hoang_nam", "huu_dat", "quang_huy", "thanh_phong"]:
+              t0 = time.time()
+              wav, dur = tts.synthesize(os.environ["TEXT"], voice=v, lang="vi", total_steps=32, speed=1.0)
+              tts.save_audio(wav, os.path.join(os.environ["RUNNER_TEMP"], "raw", f"2-korva-{v}.wav"))
+              print(f"Korva {v}: {dur:.1f}s audio trong {time.time()-t0:.0f}s")
+          PY
+          python "$RUNNER_TEMP/korva.py"
+
+      - name: 3) VietVoice-TTS (clone giong hunter + giong nam mien Bac)
+        continue-on-error: true
+        run: |
+          python -m venv "$RUNNER_TEMP/vv" && . "$RUNNER_TEMP/vv/bin/activate"
+          pip install -q "vietvoicetts[cpu] @ git+https://github.com/nguyenvulebinh/VietVoice-TTS.git"
+          cat > "$RUNNER_TEMP/vv.py" <<'PY'
+          import os, time
+          from vietvoicetts import synthesize
+          out = os.path.join(os.environ["RUNNER_TEMP"], "raw")
+          ref = "assets/voices/hunter-low-tone"
+          jobs = [
+              ("3-vietvoice-clone-hunter.wav", dict(reference_audio=f"{ref}/ref.wav",
+                                                   reference_text=open(f"{ref}/ref.txt", encoding="utf-8").read().strip())),
+              ("3-vietvoice-nam-mien-bac.wav", dict(gender="male", area="northern", group="story", emotion="serious")),
+          ]
+          for name, kw in jobs:
+              t0 = time.time()
+              try:
+                  dur = synthesize(os.environ["TEXT"], os.path.join(out, name), **kw)
+                  print(f"VietVoice {name}: {dur:.1f}s audio trong {time.time()-t0:.0f}s")
+              except Exception as e:
+                  print(f"VietVoice {name} LOI: {type(e).__name__}: {str(e)[:200]}")
+          PY
+          python "$RUNNER_TEMP/vv.py"
+
+      - name: Chuan hoa am luong (de nghe cong bang) va xuat mp3
+        run: |
+          mkdir -p so-sanh-giong
+          for f in "$RUNNER_TEMP"/raw/*; do
+            n=$(basename "${f%.*}")
+            ffmpeg -y -loglevel error -i "$f" -af "loudnorm=I=-16:TP=-1.5:LRA=11" -ar 44100 -b:a 160k "so-sanh-giong/$n.mp3"
+          done
+          ls -la so-sanh-giong
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: so-sanh-giong
+          path: so-sanh-giong/
+          retention-days: 14
