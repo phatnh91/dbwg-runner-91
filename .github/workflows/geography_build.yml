@@ -7,7 +7,7 @@ on:
     inputs:
       mode:
         type: choice
-        options: [next, extend, rebuild, studio, smoke, audit, english-next]
+        options: [daily, next, extend, rebuild, studio, smoke, audit, english-next]
         default: next
       episode:
         description: Episode ID for rebuild
@@ -26,7 +26,7 @@ jobs:
       max-parallel: 1
       fail-fast: false
       matrix:
-        edition: ${{ fromJSON(github.event_name == 'schedule' && '["vi","en"]' || '["manual"]') }}
+        edition: ${{ fromJSON((github.event_name == 'schedule' || inputs.mode == 'daily') && '["vi","en"]' || '["manual"]') }}
     name: Draft ${{ matrix.edition }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -45,7 +45,7 @@ jobs:
           node-version: '22'
       - name: Validate inputs
         env:
-          MODE: ${{ matrix.edition == 'en' && 'english-next' || inputs.mode || 'next' }}
+          MODE: ${{ matrix.edition == 'en' && 'english-next' || inputs.mode != 'daily' && inputs.mode || 'next' }}
           EPISODE: ${{ inputs.episode }}
           REQUEST: ${{ inputs.request }}
         shell: bash
@@ -76,7 +76,7 @@ jobs:
           CHANNEL: vi
           DRAFT_VOICE: '0'
           GEOGRAPHY_APPROVAL_PUBLIC_KEY: ${{ vars.GEOGRAPHY_APPROVAL_PUBLIC_KEY }}
-          GEO_BUILD_MODE: ${{ matrix.edition == 'en' && 'english-next' || inputs.mode || 'next' }}
+          GEO_BUILD_MODE: ${{ matrix.edition == 'en' && 'english-next' || inputs.mode != 'daily' && inputs.mode || 'next' }}
           GEO_BUILD_EPISODE: ${{ inputs.episode }}
           GEO_BUILD_REQUEST: ${{ inputs.request }}
           AI_PROVIDERS: ${{ vars.XOAI_AI_PROVIDERS }}
